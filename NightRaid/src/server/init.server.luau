@@ -1072,8 +1072,13 @@ task.spawn(function()
             local touchingParts = workspace:GetPartsInPart(zone, overlap)
             local inZone = {}
             for _, part in touchingParts do
-                local pl = Players:GetPlayerFromCharacter(part.Parent)
-                if pl then inZone[pl] = true end
+                -- Resolve accessory parts as well as direct character body parts.
+                local character = part:FindFirstAncestorOfClass("Model")
+                local pl = character and Players:GetPlayerFromCharacter(character)
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                if pl and character == pl.Character and humanoid and humanoid.Health > 0 then
+                    inZone[pl] = true
+                end
             end
 
             for player, _ in inZone do
