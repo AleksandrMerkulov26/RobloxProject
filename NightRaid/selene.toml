@@ -1,0 +1,2 @@
+# Use Selene's built-in Roblox and Luau definitions.
+std = "roblox"
