@@ -68,16 +68,36 @@ end
 -- ========================================================
 -- 3. ПАПКИ И СОСТОЯНИЕ МИРА
 -- ========================================================
-local lootContainer = workspace:FindFirstChild("LootItems") or Instance.new("Folder", workspace)
+local lootContainer = workspace:FindFirstChild("LootItems")
+if not lootContainer then
+    lootContainer = Instance.new("Folder")
+    lootContainer.Name = "LootItems"
+    lootContainer.Parent = workspace
+end
 lootContainer.Name = "LootItems"
 
-local weaponsContainer = workspace:FindFirstChild("GroundWeapons") or Instance.new("Folder", workspace)
+local weaponsContainer = workspace:FindFirstChild("GroundWeapons")
+if not weaponsContainer then
+    weaponsContainer = Instance.new("Folder")
+    weaponsContainer.Name = "GroundWeapons"
+    weaponsContainer.Parent = workspace
+end
 weaponsContainer.Name = "GroundWeapons"
 
-local hazardsContainer = workspace:FindFirstChild("Hazards") or Instance.new("Folder", workspace)
+local hazardsContainer = workspace:FindFirstChild("Hazards")
+if not hazardsContainer then
+    hazardsContainer = Instance.new("Folder")
+    hazardsContainer.Name = "Hazards"
+    hazardsContainer.Parent = workspace
+end
 hazardsContainer.Name = "Hazards"
 
-local smokesContainer = workspace:FindFirstChild("Smokes") or Instance.new("Folder", workspace)
+local smokesContainer = workspace:FindFirstChild("Smokes")
+if not smokesContainer then
+    smokesContainer = Instance.new("Folder")
+    smokesContainer.Name = "Smokes"
+    smokesContainer.Parent = workspace
+end
 smokesContainer.Name = "Smokes"
 
 local playerInventories = {}
