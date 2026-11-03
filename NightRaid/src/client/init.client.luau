@@ -1,0 +1,603 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
+
+local player = Players.LocalPlayer
+
+-- ==========================================
+-- БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ К NETWORK (БЕЗ INFINITE YIELD)
+-- ==========================================
+local networkFolder = ReplicatedStorage:WaitForChild("Network", 10)
+if not networkFolder then
+    warn("[КЛИЕНТ ОШИБКА]: Сетевая папка Network не найдена! Проверьте консоль сервера.")
+    return
+end
+
+local currentPhaseValue = networkFolder:WaitForChild("CurrentPhase")
+local stateChangedEvent = networkFolder:WaitForChild("StateChanged")
+local inventoryUpdatedEvent = networkFolder:WaitForChild("InventoryUpdated")
+local extractionProgressEvent = networkFolder:WaitForChild("ExtractionProgress")
+local dropItemEvent = networkFolder:WaitForChild("DropItem")
+local selectLoadoutEvent = networkFolder:WaitForChild("SelectLoadout")
+local loadoutAppliedEvent = networkFolder:WaitForChild("LoadoutApplied")
+local makeNoiseEvent = networkFolder:WaitForChild("MakeNoise")
+local raidSummaryEvent = networkFolder:WaitForChild("ShowRaidSummary")
+local throwSmokeEvent = networkFolder:WaitForChild("ThrowSmoke")
+local fireTaserEvent = networkFolder:WaitForChild("FireTaser")
+local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade")
+local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
+
+local currentInventoryData = { TotalValue = 0, TotalWeight = 0, Items = {} }
+local currentLoadout = Config.Loadouts[1]
+local currentUpgrades = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+
+-- ==========================================
+-- ЗВУКИ (SFX)
+-- ==========================================
+local function PlayLocalSFX(soundType)
+    local sound = Instance.new("Sound")
+    sound.Volume = 0.6
+    sound.Parent = SoundService
+
+    if soundType == "Grapple" then
+        sound.SoundId = "rbxassetid://9114223171"
+        sound.Pitch = 1.3
+    elseif soundType == "Alarm" then
+        sound.SoundId = "rbxassetid://9114223847"
+        sound.Pitch = 0.9
+        sound.Volume = 0.8
+    elseif soundType == "Pickup" then
+        sound.SoundId = "rbxassetid://9114221762"
+        sound.Pitch = 1.2
+    elseif soundType == "Smoke" then
+        sound.SoundId = "rbxassetid://9114222474"
+        sound.Pitch = 0.8
+    end
+
+    sound:Play()
+    sound.Ended:Connect(function() sound:Destroy() end)
+end
+
+-- ==========================================
+-- ПРИЦЕЛ (CROSSHAIR)
+-- ==========================================
+local function CreateCrosshair()
+    local playerGui = player:WaitForChild("PlayerGui")
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "CrosshairGui"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = playerGui
+
+    local dot = Instance.new("Frame")
+    dot.Name = "CrosshairDot"
+    dot.Size = UDim2.new(0, 6, 0, 6)
+    dot.AnchorPoint = Vector2.new(0.5, 0.5)
+    dot.Position = UDim2.new(0.5, 0, 0.5, 0)
+    dot.BackgroundColor3 = Color3.fromRGB(0, 255, 180)
+    dot.BorderSizePixel = 0
+    dot.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = dot
+end
+
+task.spawn(CreateCrosshair)
+
+-- ==========================================
+-- СТАБИЛИЗИРОВАННЫЙ ФОНАРЬ (F)
+-- ==========================================
+local isFlashlightOn = false
+
+local lightAnchor = workspace:FindFirstChild("ClientFlashlightRig")
+if lightAnchor then lightAnchor:Destroy() end
+
+lightAnchor = Instance.new("Part")
+lightAnchor.Name = "ClientFlashlightRig"
+lightAnchor.Transparency = 1
+lightAnchor.CanCollide = false
+lightAnchor.CanQuery = false
+lightAnchor.CanTouch = false
+lightAnchor.CastShadow = false
+lightAnchor.Anchored = true
+lightAnchor.Size = Vector3.new(0.2, 0.2, 0.2)
+lightAnchor.Parent = workspace
+
+local spotBeam = Instance.new("SpotLight")
+spotBeam.Name = "Beam"
+spotBeam.Range = LootLogic.GetEffectiveFlashlightRange(75, currentUpgrades.Battery)
+spotBeam.Angle = 70
+spotBeam.Brightness = 3.5
+spotBeam.Color = Color3.fromRGB(255, 250, 235)
+spotBeam.Face = Enum.NormalId.Front
+spotBeam.Shadows = false
+spotBeam.Enabled = false
+spotBeam.Parent = lightAnchor
+
+local fillPoint = Instance.new("PointLight")
+fillPoint.Name = "Fill"
+fillPoint.Range = 25
+fillPoint.Brightness = 1.0
+fillPoint.Color = Color3.fromRGB(255, 250, 235)
+fillPoint.Shadows = false
+fillPoint.Enabled = false
+fillPoint.Parent = lightAnchor
+
+RunService.RenderStepped:Connect(function()
+    if not isFlashlightOn then return end
+
+    local char = player.Character
+    local head = char and char:FindFirstChild("Head")
+    if head then
+        local camCFrame = workspace.CurrentCamera.CFrame
+        lightAnchor.CFrame = CFrame.lookAt(head.Position, head.Position + camCFrame.LookVector)
+    end
+end)
+
+local function ToggleFlashlight()
+    isFlashlightOn = not isFlashlightOn
+    spotBeam.Enabled = isFlashlightOn
+    fillPoint.Enabled = isFlashlightOn
+end
+
+-- ==========================================
+-- КРЮК-КОШКА (КЛАВИША Q)
+-- ==========================================
+local isGrappling = false
+local alignPos = nil
+local activeBeam = nil
+local ropePart = nil
+local updateConn = nil
+
+local function StopGrapple(boost: boolean)
+    if not isGrappling then return end
+    isGrappling = false
+
+    if updateConn then
+        updateConn:Disconnect()
+        updateConn = nil
+    end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+    if hum then
+        hum.AutoRotate = true
+        hum.PlatformStand = false
+    end
+
+    if hrp then
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        if boost then
+            local fwd = workspace.CurrentCamera.CFrame.LookVector
+            hrp.AssemblyLinearVelocity = Vector3.new(fwd.X * 25, 30, fwd.Z * 25)
+        else
+            local v = hrp.AssemblyLinearVelocity
+            hrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.5, math.clamp(v.Y, -20, 20), v.Z * 0.5)
+        end
+    end
+
+    if alignPos then alignPos:Destroy() alignPos = nil end
+    if activeBeam then activeBeam:Destroy() activeBeam = nil end
+    if ropePart then ropePart:Destroy() ropePart = nil end
+end
+
+local function FireGrapple()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 or isGrappling then return end
+
+    local cam = workspace.CurrentCamera
+    local vSize = cam.ViewportSize
+    local centerRay = cam:ViewportPointToRay(vSize.X / 2, vSize.Y / 2)
+
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = { char, lightAnchor }
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local maxDist = currentLoadout.GrappleDistance or Config.GrappleDistance
+    local hit = workspace:Raycast(centerRay.Origin, centerRay.Direction * maxDist, rayParams)
+    if not hit or not hit.Instance then return end
+
+    local targetPos = hit.Position
+    isGrappling = true
+
+    PlayLocalSFX("Grapple")
+    makeNoiseEvent:FireServer(hrp.Position, 40)
+
+    ropePart = Instance.new("Part")
+    ropePart.Size = Vector3.new(0.5, 0.5, 0.5)
+    ropePart.Position = targetPos
+    ropePart.Anchored = true
+    ropePart.CanCollide = false
+    ropePart.Transparency = 1
+    ropePart.Parent = workspace
+
+    local att0 = Instance.new("Attachment", hrp)
+    local att1 = Instance.new("Attachment", ropePart)
+
+    activeBeam = Instance.new("Beam")
+    activeBeam.Attachment0 = att0
+    activeBeam.Attachment1 = att1
+    activeBeam.Width0 = 0.2
+    activeBeam.Width1 = 0.1
+    activeBeam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 180))
+    activeBeam.FaceCamera = true
+    activeBeam.LightEmission = 1
+    activeBeam.Parent = hrp
+
+    alignPos = Instance.new("AlignPosition")
+    alignPos.Mode = Enum.PositionAlignmentMode.TwoAttachment
+    alignPos.Attachment0 = att0
+    alignPos.Attachment1 = att1
+    alignPos.MaxForce = 1e6
+    alignPos.MaxVelocity = currentLoadout.GrappleSpeed or Config.GrapplePullSpeed
+    alignPos.Responsiveness = 45
+    alignPos.Parent = hrp
+
+    hum.AutoRotate = false
+
+    local startTime = os.clock()
+    local lastDist = (targetPos - hrp.Position).Magnitude
+
+    updateConn = RunService.Heartbeat:Connect(function()
+        if not isGrappling or not hrp.Parent then
+            StopGrapple(false)
+            return
+        end
+
+        local dist = (targetPos - hrp.Position).Magnitude
+        local elapsed = os.clock() - startTime
+
+        if dist <= 7.0 then
+            StopGrapple(true)
+            return
+        end
+
+        if elapsed > 1.8 or (elapsed > 0.4 and math.abs(dist - lastDist) < 0.05) then
+            StopGrapple(false)
+            return
+        end
+
+        lastDist = dist
+    end)
+end
+
+-- ==========================================
+-- ДЫМ (G)
+-- ==========================================
+local smokeCooldown = false
+local function ThrowSmoke()
+    if smokeCooldown then return end
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    smokeCooldown = true
+    PlayLocalSFX("Smoke")
+    throwSmokeEvent:FireServer(hrp.Position)
+
+    task.delay(10, function() smokeCooldown = false end)
+end
+
+-- ==========================================
+-- ОБРАБОТКА ВВОДА (E — ТОЛЬКО ВЗАИМОДЕЙСТВИЕ, Q — КРЮК)
+-- ==========================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        if isGrappling then StopGrapple(false) else FireGrapple() end
+    elseif input.KeyCode == Enum.KeyCode.F then
+        ToggleFlashlight()
+    elseif input.KeyCode == Enum.KeyCode.G then
+        ThrowSmoke()
+    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local char = player.Character
+        if char and char:FindFirstChild("Taser") then
+            local cam = workspace.CurrentCamera
+            local ray = cam:ViewportPointToRay(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+            fireTaserEvent:FireServer(ray.Origin + ray.Direction * 35)
+            PlayLocalSFX("Alarm")
+        end
+    end
+end)
+
+-- ==========================================
+-- ИНТЕРФЕЙС HUD, РЮКЗАК И РЫНОК
+-- ==========================================
+local function CreateMainUI()
+    local playerGui = player:WaitForChild("PlayerGui")
+    local hud = Instance.new("ScreenGui", playerGui)
+    hud.Name = "ExtractionHUD"
+    hud.ResetOnSpawn = false
+
+    -- Карточка статуса
+    local card = Instance.new("Frame", hud)
+    card.Size = UDim2.new(0, 250, 0, 90)
+    card.Position = UDim2.new(1, -265, 0, 20)
+    card.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+    card.BackgroundTransparency = 0.2
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
+
+    local lootLabel = Instance.new("TextLabel", card)
+    lootLabel.Size = UDim2.new(1, -20, 0, 26)
+    lootLabel.Position = UDim2.new(0, 10, 0, 6)
+    lootLabel.Text = "Добыча: $0"
+    lootLabel.TextColor3 = Color3.fromRGB(0, 255, 180)
+    lootLabel.TextSize = 17
+    lootLabel.Font = Enum.Font.GothamBold
+    lootLabel.TextXAlignment = Enum.TextXAlignment.Left
+    lootLabel.BackgroundTransparency = 1
+
+    local weightLabel = Instance.new("TextLabel", card)
+    weightLabel.Size = UDim2.new(1, -20, 0, 20)
+    weightLabel.Position = UDim2.new(0, 10, 0, 32)
+    local effMaxW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
+    weightLabel.Text = string.format("Вес: 0.0 / %.1f кг [B]", effMaxW)
+    weightLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    weightLabel.TextSize = 13
+    weightLabel.Font = Enum.Font.GothamMedium
+    weightLabel.TextXAlignment = Enum.TextXAlignment.Left
+    weightLabel.BackgroundTransparency = 1
+
+    local controlsHint = Instance.new("TextLabel", card)
+    controlsHint.Size = UDim2.new(1, -20, 0, 20)
+    controlsHint.Position = UDim2.new(0, 10, 0, 58)
+    controlsHint.Text = "[E] Взять | [Q] Крюк | [F] Свет | [G] Дым"
+    controlsHint.TextColor3 = Color3.fromRGB(150, 160, 180)
+    controlsHint.TextSize = 11
+    controlsHint.Font = Enum.Font.Gotham
+    controlsHint.TextXAlignment = Enum.TextXAlignment.Left
+    controlsHint.BackgroundTransparency = 1
+
+    -- Окно рюкзака (B)
+    local invModal = Instance.new("Frame", hud)
+    invModal.Size = UDim2.new(0, 440, 0, 380)
+    invModal.Position = UDim2.new(0.5, -220, 0.5, -190)
+    invModal.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
+    invModal.Visible = false
+    invModal.ZIndex = 15
+    Instance.new("UICorner", invModal).CornerRadius = UDim.new(0, 10)
+
+    local title = Instance.new("TextLabel", invModal)
+    title.Size = UDim2.new(1, -20, 0, 40)
+    title.Position = UDim2.new(0, 15, 0, 5)
+    title.Text = "РЮКЗАК НАЛЁТЧИКА [B чтобы закрыть]"
+    title.TextColor3 = Color3.fromRGB(0, 255, 180)
+    title.TextSize = 16
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.BackgroundTransparency = 1
+    title.ZIndex = 16
+
+    local scroll = Instance.new("ScrollingFrame", invModal)
+    scroll.Size = UDim2.new(1, -30, 1, -60)
+    scroll.Position = UDim2.new(0, 15, 0, 45)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 5
+    scroll.ZIndex = 16
+    Instance.new("UIListLayout", scroll).Padding = UDim.new(0, 6)
+
+    local function RefreshInventoryList()
+        for _, child in scroll:GetChildren() do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+
+        for index, item in ipairs(currentInventoryData.Items) do
+            local row = Instance.new("Frame", scroll)
+            row.Size = UDim2.new(1, -10, 0, 44)
+            row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+            row.ZIndex = 17
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+            local nameLabel = Instance.new("TextLabel", row)
+            nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
+            nameLabel.Position = UDim2.new(0, 10, 0, 0)
+            nameLabel.Text = string.format("%s ($%d, %.1f кг%s)", item.Name, item.Value, item.Weight, item.Fragile and " [ХРУПКОЕ]" or "")
+            nameLabel.TextColor3 = item.Fragile and Color3.fromRGB(255, 140, 180) or Color3.fromRGB(255, 255, 255)
+            nameLabel.TextSize = 12
+            nameLabel.Font = Enum.Font.GothamMedium
+            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.ZIndex = 18
+
+            local dropBtn = Instance.new("TextButton", row)
+            dropBtn.Size = UDim2.new(0, 85, 0, 28)
+            dropBtn.Position = UDim2.new(1, -95, 0.5, -14)
+            dropBtn.Text = "Сбросить"
+            dropBtn.BackgroundColor3 = Color3.fromRGB(160, 45, 45)
+            dropBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            dropBtn.Font = Enum.Font.GothamBold
+            dropBtn.TextSize = 11
+            dropBtn.ZIndex = 18
+            Instance.new("UICorner", dropBtn).CornerRadius = UDim.new(0, 4)
+
+            dropBtn.MouseButton1Click:Connect(function()
+                dropItemEvent:FireServer(index)
+            end)
+        end
+    end
+
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.B then
+            invModal.Visible = not invModal.Visible
+            if invModal.Visible then RefreshInventoryList() end
+        end
+    end)
+
+    -- Черный рынок
+    local marketModal = Instance.new("Frame", hud)
+    marketModal.Name = "MarketModal"
+    marketModal.Size = UDim2.new(0, 520, 0, 320)
+    marketModal.Position = UDim2.new(0.5, -260, 0.5, -160)
+    marketModal.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
+    marketModal.Visible = false
+    marketModal.ZIndex = 50
+    Instance.new("UICorner", marketModal).CornerRadius = UDim.new(0, 12)
+
+    local mTitle = Instance.new("TextLabel", marketModal)
+    mTitle.Size = UDim2.new(1, -40, 0, 45)
+    mTitle.Position = UDim2.new(0, 20, 0, 8)
+    mTitle.Text = "ЧЁРНЫЙ РЫНОК: АПГРЕЙДЫ"
+    mTitle.TextColor3 = Color3.fromRGB(240, 180, 40)
+    mTitle.Font = Enum.Font.GothamBlack
+    mTitle.TextSize = 16
+    mTitle.TextXAlignment = Enum.TextXAlignment.Left
+    mTitle.BackgroundTransparency = 1
+    mTitle.ZIndex = 51
+
+    local mClose = Instance.new("TextButton", marketModal)
+    mClose.Size = UDim2.new(0, 32, 0, 32)
+    mClose.Position = UDim2.new(1, -42, 0, 12)
+    mClose.Text = "X"
+    mClose.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mClose.BackgroundColor3 = Color3.fromRGB(160, 40, 40)
+    mClose.Font = Enum.Font.GothamBold
+    mClose.ZIndex = 52
+    Instance.new("UICorner", mClose).CornerRadius = UDim.new(0, 6)
+    mClose.MouseButton1Click:Connect(function() marketModal.Visible = false end)
+
+    local mScroll = Instance.new("ScrollingFrame", marketModal)
+    mScroll.Size = UDim2.new(1, -40, 1, -70)
+    mScroll.Position = UDim2.new(0, 20, 0, 55)
+    mScroll.BackgroundTransparency = 1
+    mScroll.BorderSizePixel = 0
+    mScroll.ZIndex = 51
+    Instance.new("UIListLayout", mScroll).Padding = UDim.new(0, 8)
+
+    local function RefreshMarketUI()
+        for _, child in mScroll:GetChildren() do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+
+        for uKey, uData in pairs(LootLogic.UpgradesConfig) do
+            local currentLvl = currentUpgrades[uKey] or 0
+            local nextCost = LootLogic.GetUpgradeCost(uKey, currentLvl)
+
+            local row = Instance.new("Frame", mScroll)
+            row.Size = UDim2.new(1, -10, 0, 60)
+            row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+            row.ZIndex = 52
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+            local infoLabel = Instance.new("TextLabel", row)
+            infoLabel.Size = UDim2.new(0.65, 0, 1, 0)
+            infoLabel.Position = UDim2.new(0, 12, 0, 0)
+            infoLabel.Text = string.format("%s (Ур. %d/%d)\nБонус: +%d за уровень", uData.Name, currentLvl, uData.MaxLevel, uData.BonusPerLevel)
+            infoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            infoLabel.Font = Enum.Font.GothamMedium
+            infoLabel.TextSize = 12
+            infoLabel.TextXAlignment = Enum.TextXAlignment.Left
+            infoLabel.BackgroundTransparency = 1
+            infoLabel.ZIndex = 53
+
+            local buyBtn = Instance.new("TextButton", row)
+            buyBtn.Size = UDim2.new(0, 110, 0, 36)
+            buyBtn.Position = UDim2.new(1, -120, 0.5, -18)
+            buyBtn.ZIndex = 53
+            Instance.new("UICorner", buyBtn).CornerRadius = UDim.new(0, 6)
+
+            if nextCost then
+                buyBtn.Text = string.format("Купить ($%d)", nextCost)
+                buyBtn.BackgroundColor3 = Color3.fromRGB(220, 140, 30)
+                buyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                buyBtn.MouseButton1Click:Connect(function()
+                    buyUpgradeEvent:FireServer(uKey)
+                end)
+            else
+                buyBtn.Text = "МАКС. УРОВЕНЬ"
+                buyBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 75)
+                buyBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+            end
+        end
+    end
+
+    upgradesUpdatedEvent.OnClientEvent:Connect(function(newUpgrades, openUI)
+        currentUpgrades = newUpgrades
+        spotBeam.Range = LootLogic.GetEffectiveFlashlightRange(75, currentUpgrades.Battery)
+        local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
+        weightLabel.Text = string.format("Вес: %.1f / %.1f кг [B]", currentInventoryData.TotalWeight, effW)
+
+        if openUI then marketModal.Visible = true end
+        if marketModal.Visible then RefreshMarketUI() end
+    end)
+
+    loadoutAppliedEvent.OnClientEvent:Connect(function(appliedLoadout, appliedUpgrades)
+        currentLoadout = appliedLoadout
+        if appliedUpgrades then currentUpgrades = appliedUpgrades end
+        spotBeam.Range = LootLogic.GetEffectiveFlashlightRange(75, currentUpgrades.Battery)
+        local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
+        weightLabel.Text = string.format("Вес: %.1f / %.1f кг [B]", currentInventoryData.TotalWeight, effW)
+    end)
+
+    inventoryUpdatedEvent.OnClientEvent:Connect(function(invData, message)
+        currentInventoryData = invData
+        lootLabel.Text = string.format("Добыча: $%d", invData.TotalValue)
+        local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
+        weightLabel.Text = string.format("Вес: %.1f / %.1f кг [B]", invData.TotalWeight, effW)
+
+        if invModal.Visible then RefreshInventoryList() end
+        if message then PlayLocalSFX("Pickup") end
+    end)
+end
+
+task.spawn(CreateMainUI)
+
+-- ==========================================
+-- ТАЙМЕР РАУНДА
+-- ==========================================
+local function CreateTimerUI()
+    local playerGui = player:WaitForChild("PlayerGui")
+    local timerGui = Instance.new("ScreenGui", playerGui)
+    timerGui.Name = "TimerHUD"
+    timerGui.ResetOnSpawn = false
+
+    local topBar = Instance.new("Frame", timerGui)
+    topBar.Size = UDim2.new(0, 260, 0, 45)
+    topBar.Position = UDim2.new(0.5, -130, 0, 15)
+    topBar.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+    topBar.BackgroundTransparency = 0.2
+    Instance.new("UICorner", topBar).CornerRadius = UDim.new(0, 8)
+
+    local phaseLabel = Instance.new("TextLabel", topBar)
+    phaseLabel.Size = UDim2.new(1, 0, 1, 0)
+    phaseLabel.Text = "Загрузка..."
+    phaseLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    phaseLabel.TextSize = 16
+    phaseLabel.Font = Enum.Font.GothamBold
+    phaseLabel.BackgroundTransparency = 1
+
+    stateChangedEvent.OnClientEvent:Connect(function(phase, dur)
+        local finish = os.clock() + dur
+        task.spawn(function()
+            while os.clock() < finish do
+                local left = math.ceil(finish - os.clock())
+                if phase == "LobbyPhase" then
+                    phaseLabel.Text = string.format("Убежище: %d сек", left)
+                    phaseLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+                elseif phase == "LootPhase" then
+                    phaseLabel.Text = string.format("Сбор лута: %d сек", left)
+                    phaseLabel.TextColor3 = Color3.fromRGB(0, 220, 255)
+                elseif phase == "ExtractionPhase" then
+                    phaseLabel.Text = string.format("ЭВАКУАЦИЯ: %d сек!", left)
+                    phaseLabel.TextColor3 = Color3.fromRGB(0, 255, 140)
+                end
+                task.wait(1)
+            end
+        end)
+    end)
+end
+
+task.spawn(CreateTimerUI)
+
+print("[КЛИЕНТ]: Клиентский контроллер активен. Сбор [E], Крюк [Q], Фонарь [F], Дым [G].")
