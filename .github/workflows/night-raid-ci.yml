@@ -27,6 +27,10 @@ jobs:
         working-directory: NightRaid
         run: aftman install
 
+      - name: Run Selene
+        working-directory: NightRaid
+        run: selene src
+
       - name: Build production game
         working-directory: NightRaid
         run: rojo build default.project.json --output /tmp/NightRaid.rbxlx
