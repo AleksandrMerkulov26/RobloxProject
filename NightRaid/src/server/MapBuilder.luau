@@ -60,7 +60,7 @@ function MapBuilder.BuildFacility()
     }
 
     for _, c in containers do
-        createWall("Container", c.Size, c.Pos, c.Color, Enum.Material.CorrugatedMetal)
+        createWall("Container", c.Size, c.Pos, c.Color, Enum.Material.DiamondPlate)
         table.insert(lootSpawnPoints, c.Pos + Vector3.new(0, c.Size.Y / 2 + 1.5, 0))
     end
 
