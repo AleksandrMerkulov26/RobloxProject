@@ -25,7 +25,7 @@ jobs:
 
       - name: Install project tools
         working-directory: NightRaid
-        run: aftman install
+        run: aftman install --no-trust-check
 
       - name: Run Selene
         working-directory: NightRaid
