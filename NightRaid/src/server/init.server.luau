@@ -98,8 +98,8 @@ local function canPerformAction(player, actionName, cooldown)
         remoteActionTimes[player] = actions
     end
 
-    local lastAction = actions[actionName] or 0
-    if now - lastAction < cooldown then
+    local lastAction = actions[actionName]
+    if lastAction and now - lastAction < cooldown then
         return false
     end
 
