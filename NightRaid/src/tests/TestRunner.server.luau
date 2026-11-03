@@ -130,17 +130,6 @@ local function RunSuite()
     AssertTest("Выстрел тайзера с 25 studs (макс 45) -> Попадание", LootLogic.CanTaserHit(Vector3.zero, Vector3.new(0, 0, 25), 45), true)
     AssertTest("Выстрел тайзера с 60 studs (макс 45) -> Промах по дальности", LootLogic.CanTaserHit(Vector3.zero, Vector3.new(0, 0, 60), 45), false)
 
-    print("\n--------------------------------------------------------")
-    if failCount == 0 then
-        print(string.format("РЕЗУЛЬТАТ: ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ! (%d/%d)", passCount, totalCount))
-    else
-        warn(string.format("РЕЗУЛЬТАТ: ОБНАРУЖЕНЫ ОШИБКИ! Пройдено: %d, Провалено: %d из %d", passCount, failCount, totalCount))
-    end
-    print("========================================================\n")
-end
-
-task.spawn(RunSuite)
-
 -- ----------------------------------------------------
     -- БЛОК 8: ЭКОНОМИКА УБЕЖИЩА И АПГРЕЙДЫ
     -- ----------------------------------------------------
@@ -165,3 +154,14 @@ task.spawn(RunSuite)
 
     local effLight = LootLogic.GetEffectiveFlashlightRange(75, 1)
     AssertTest("Дальность фонаря 75 + акб 1 ур (+15 studs) = 90 studs", effLight, 90)
+
+    print("\n--------------------------------------------------------")
+    if failCount == 0 then
+        print(string.format("РЕЗУЛЬТАТ: ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ! (%d/%d)", passCount, totalCount))
+    else
+        warn(string.format("РЕЗУЛЬТАТ: ОБНАРУЖЕНЫ ОШИБКИ! Пройдено: %d, Провалено: %d из %d", passCount, failCount, totalCount))
+    end
+    print("========================================================\n")
+end
+
+task.spawn(RunSuite)
