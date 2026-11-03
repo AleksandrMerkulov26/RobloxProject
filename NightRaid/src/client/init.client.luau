@@ -282,7 +282,7 @@ local function ThrowSmoke()
 
     smokeCooldown = true
     PlayLocalSFX("Smoke")
-    throwSmokeEvent:FireServer(hrp.Position)
+    throwSmokeEvent:FireServer()
 
     task.delay(10, function() smokeCooldown = false end)
 end
