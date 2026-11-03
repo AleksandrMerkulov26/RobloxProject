@@ -349,24 +349,32 @@ local function SpawnGroundWeapon(spawnPos)
     prompt.Parent = weaponPart
 
     prompt.Triggered:Connect(function(player)
-        weaponPart:Destroy()
         local backpack = player:FindFirstChild("Backpack")
-        if backpack and not backpack:FindFirstChild("Taser") and not (player.Character and player.Character:FindFirstChild("Taser")) then
-            local tool = Instance.new("Tool")
-            tool.Name = "Taser"
-            tool.RequiresHandle = true
-            tool.CanBeDropped = true
+        if not backpack
+            or backpack:FindFirstChild("Taser")
+            or (player.Character and player.Character:FindFirstChild("Taser"))
+        then
+            return
+        end
 
-            local handle = Instance.new("Part")
-            handle.Name = "Handle"
-            handle.Size = Vector3.new(1.4, 0.6, 1.0)
-            handle.Color = Color3.fromRGB(240, 200, 30)
-            handle.Material = Enum.Material.Metal
-            handle.Parent = tool
+        local tool = Instance.new("Tool")
+        tool.Name = "Taser"
+        tool.RequiresHandle = true
+        tool.CanBeDropped = true
 
-            tool.Parent = backpack
-            local inv = playerInventories[player]
-            if inv then inventoryUpdatedEvent:FireClient(player, inv, "Подобран шокер [ЛКМ чтобы выстрелить]") end
+        local handle = Instance.new("Part")
+        handle.Name = "Handle"
+        handle.Size = Vector3.new(1.4, 0.6, 1.0)
+        handle.Color = Color3.fromRGB(240, 200, 30)
+        handle.Material = Enum.Material.Metal
+        handle.Parent = tool
+
+        tool.Parent = backpack
+        weaponPart:Destroy()
+
+        local inv = playerInventories[player]
+        if inv then
+            inventoryUpdatedEvent:FireClient(player, inv, "Подобран шокер [ЛКМ чтобы выстрелить]")
         end
     end)
 end
