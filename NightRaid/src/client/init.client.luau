@@ -220,8 +220,10 @@ local function FireGrapple()
     ropePart.Transparency = 1
     ropePart.Parent = workspace
 
-    local att0 = Instance.new("Attachment", hrp)
-    local att1 = Instance.new("Attachment", ropePart)
+    local att0 = Instance.new("Attachment")
+    att0.Parent = hrp
+    local att1 = Instance.new("Attachment")
+    att1.Parent = ropePart
 
     activeBeam = Instance.new("Beam")
     activeBeam.Attachment0 = att0
@@ -315,19 +317,22 @@ end)
 -- ==========================================
 local function CreateMainUI()
     local playerGui = player:WaitForChild("PlayerGui")
-    local hud = Instance.new("ScreenGui", playerGui)
+    local hud = Instance.new("ScreenGui")
+    hud.Parent = playerGui
     hud.Name = "ExtractionHUD"
     hud.ResetOnSpawn = false
 
     -- Карточка статуса
-    local card = Instance.new("Frame", hud)
+    local card = Instance.new("Frame")
+    card.Parent = hud
     card.Size = UDim2.new(0, 250, 0, 90)
     card.Position = UDim2.new(1, -265, 0, 20)
     card.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     card.BackgroundTransparency = 0.2
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
-    local lootLabel = Instance.new("TextLabel", card)
+    local lootLabel = Instance.new("TextLabel")
+    lootLabel.Parent = card
     lootLabel.Size = UDim2.new(1, -20, 0, 26)
     lootLabel.Position = UDim2.new(0, 10, 0, 6)
     lootLabel.Text = "Добыча: $0"
@@ -337,7 +342,8 @@ local function CreateMainUI()
     lootLabel.TextXAlignment = Enum.TextXAlignment.Left
     lootLabel.BackgroundTransparency = 1
 
-    local weightLabel = Instance.new("TextLabel", card)
+    local weightLabel = Instance.new("TextLabel")
+    weightLabel.Parent = card
     weightLabel.Size = UDim2.new(1, -20, 0, 20)
     weightLabel.Position = UDim2.new(0, 10, 0, 32)
     local effMaxW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
@@ -348,7 +354,8 @@ local function CreateMainUI()
     weightLabel.TextXAlignment = Enum.TextXAlignment.Left
     weightLabel.BackgroundTransparency = 1
 
-    local controlsHint = Instance.new("TextLabel", card)
+    local controlsHint = Instance.new("TextLabel")
+    controlsHint.Parent = card
     controlsHint.Size = UDim2.new(1, -20, 0, 20)
     controlsHint.Position = UDim2.new(0, 10, 0, 58)
     controlsHint.Text = "[E] Взять | [Q] Крюк | [F] Свет | [G] Дым"
@@ -359,7 +366,8 @@ local function CreateMainUI()
     controlsHint.BackgroundTransparency = 1
 
     -- Окно рюкзака (B)
-    local invModal = Instance.new("Frame", hud)
+    local invModal = Instance.new("Frame")
+    invModal.Parent = hud
     invModal.Size = UDim2.new(0, 440, 0, 380)
     invModal.Position = UDim2.new(0.5, -220, 0.5, -190)
     invModal.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
@@ -367,7 +375,8 @@ local function CreateMainUI()
     invModal.ZIndex = 15
     Instance.new("UICorner", invModal).CornerRadius = UDim.new(0, 10)
 
-    local title = Instance.new("TextLabel", invModal)
+    local title = Instance.new("TextLabel")
+    title.Parent = invModal
     title.Size = UDim2.new(1, -20, 0, 40)
     title.Position = UDim2.new(0, 15, 0, 5)
     title.Text = "РЮКЗАК НАЛЁТЧИКА [B чтобы закрыть]"
@@ -378,7 +387,8 @@ local function CreateMainUI()
     title.BackgroundTransparency = 1
     title.ZIndex = 16
 
-    local scroll = Instance.new("ScrollingFrame", invModal)
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Parent = invModal
     scroll.Size = UDim2.new(1, -30, 1, -60)
     scroll.Position = UDim2.new(0, 15, 0, 45)
     scroll.BackgroundTransparency = 1
@@ -393,13 +403,15 @@ local function CreateMainUI()
         end
 
         for index, item in ipairs(currentInventoryData.Items) do
-            local row = Instance.new("Frame", scroll)
+            local row = Instance.new("Frame")
+            row.Parent = scroll
             row.Size = UDim2.new(1, -10, 0, 44)
             row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
             row.ZIndex = 17
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
-            local nameLabel = Instance.new("TextLabel", row)
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Parent = row
             nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
             nameLabel.Position = UDim2.new(0, 10, 0, 0)
             nameLabel.Text = string.format("%s ($%d, %.1f кг%s)", item.Name, item.Value, item.Weight, item.Fragile and " [ХРУПКОЕ]" or "")
@@ -410,7 +422,8 @@ local function CreateMainUI()
             nameLabel.BackgroundTransparency = 1
             nameLabel.ZIndex = 18
 
-            local dropBtn = Instance.new("TextButton", row)
+            local dropBtn = Instance.new("TextButton")
+            dropBtn.Parent = row
             dropBtn.Size = UDim2.new(0, 85, 0, 28)
             dropBtn.Position = UDim2.new(1, -95, 0.5, -14)
             dropBtn.Text = "Сбросить"
@@ -436,7 +449,8 @@ local function CreateMainUI()
     end)
 
     -- Черный рынок
-    local marketModal = Instance.new("Frame", hud)
+    local marketModal = Instance.new("Frame")
+    marketModal.Parent = hud
     marketModal.Name = "MarketModal"
     marketModal.Size = UDim2.new(0, 520, 0, 320)
     marketModal.Position = UDim2.new(0.5, -260, 0.5, -160)
@@ -445,7 +459,8 @@ local function CreateMainUI()
     marketModal.ZIndex = 50
     Instance.new("UICorner", marketModal).CornerRadius = UDim.new(0, 12)
 
-    local mTitle = Instance.new("TextLabel", marketModal)
+    local mTitle = Instance.new("TextLabel")
+    mTitle.Parent = marketModal
     mTitle.Size = UDim2.new(1, -40, 0, 45)
     mTitle.Position = UDim2.new(0, 20, 0, 8)
     mTitle.Text = "ЧЁРНЫЙ РЫНОК: АПГРЕЙДЫ"
@@ -456,7 +471,8 @@ local function CreateMainUI()
     mTitle.BackgroundTransparency = 1
     mTitle.ZIndex = 51
 
-    local mClose = Instance.new("TextButton", marketModal)
+    local mClose = Instance.new("TextButton")
+    mClose.Parent = marketModal
     mClose.Size = UDim2.new(0, 32, 0, 32)
     mClose.Position = UDim2.new(1, -42, 0, 12)
     mClose.Text = "X"
@@ -467,7 +483,8 @@ local function CreateMainUI()
     Instance.new("UICorner", mClose).CornerRadius = UDim.new(0, 6)
     mClose.MouseButton1Click:Connect(function() marketModal.Visible = false end)
 
-    local mScroll = Instance.new("ScrollingFrame", marketModal)
+    local mScroll = Instance.new("ScrollingFrame")
+    mScroll.Parent = marketModal
     mScroll.Size = UDim2.new(1, -40, 1, -70)
     mScroll.Position = UDim2.new(0, 20, 0, 55)
     mScroll.BackgroundTransparency = 1
@@ -484,13 +501,15 @@ local function CreateMainUI()
             local currentLvl = currentUpgrades[uKey] or 0
             local nextCost = LootLogic.GetUpgradeCost(uKey, currentLvl)
 
-            local row = Instance.new("Frame", mScroll)
+            local row = Instance.new("Frame")
+            row.Parent = mScroll
             row.Size = UDim2.new(1, -10, 0, 60)
             row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
             row.ZIndex = 52
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
-            local infoLabel = Instance.new("TextLabel", row)
+            local infoLabel = Instance.new("TextLabel")
+            infoLabel.Parent = row
             infoLabel.Size = UDim2.new(0.65, 0, 1, 0)
             infoLabel.Position = UDim2.new(0, 12, 0, 0)
             infoLabel.Text = string.format("%s (Ур. %d/%d)\nБонус: +%d за уровень", uData.Name, currentLvl, uData.MaxLevel, uData.BonusPerLevel)
@@ -501,7 +520,8 @@ local function CreateMainUI()
             infoLabel.BackgroundTransparency = 1
             infoLabel.ZIndex = 53
 
-            local buyBtn = Instance.new("TextButton", row)
+            local buyBtn = Instance.new("TextButton")
+            buyBtn.Parent = row
             buyBtn.Size = UDim2.new(0, 110, 0, 36)
             buyBtn.Position = UDim2.new(1, -120, 0.5, -18)
             buyBtn.ZIndex = 53
@@ -558,18 +578,21 @@ task.spawn(CreateMainUI)
 -- ==========================================
 local function CreateTimerUI()
     local playerGui = player:WaitForChild("PlayerGui")
-    local timerGui = Instance.new("ScreenGui", playerGui)
+    local timerGui = Instance.new("ScreenGui")
+    timerGui.Parent = playerGui
     timerGui.Name = "TimerHUD"
     timerGui.ResetOnSpawn = false
 
-    local topBar = Instance.new("Frame", timerGui)
+    local topBar = Instance.new("Frame")
+    topBar.Parent = timerGui
     topBar.Size = UDim2.new(0, 260, 0, 45)
     topBar.Position = UDim2.new(0.5, -130, 0, 15)
     topBar.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     topBar.BackgroundTransparency = 0.2
     Instance.new("UICorner", topBar).CornerRadius = UDim.new(0, 8)
 
-    local phaseLabel = Instance.new("TextLabel", topBar)
+    local phaseLabel = Instance.new("TextLabel")
+    phaseLabel.Parent = topBar
     phaseLabel.Size = UDim2.new(1, 0, 1, 0)
     phaseLabel.Text = "Загрузка..."
     phaseLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
