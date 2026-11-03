@@ -106,6 +106,8 @@ local playerActiveLoadouts = {}
 local playerUpgrades = {}
 -- Сохранять данные можно только после успешного чтения DataStore.
 local playerDataLoaded = {}
+-- Prevent overlapping DataStore writes for the same player.
+local playerSaveInProgress = {}
 local remoteActionTimes = {}
 local currentSuspiciousNoise = nil
 local guardStunnedUntil = 0
@@ -549,14 +551,26 @@ end)
 
 local function SavePlayerData(player)
     if not dataStoreAvailable then return false end
+
+    -- Wait for an earlier save to finish before taking a new data snapshot.
+    while playerSaveInProgress[player] do
+        task.wait(0.05)
+    end
+
+    -- Recheck after waiting: the player may have started leaving meanwhile.
     if not playerDataLoaded[player] then
         warn(string.format("[DataStore] Пропуск сохранения %s: данные не были успешно загружены.", player.Name))
         return false
     end
 
+    playerSaveInProgress[player] = true
+
     local leaderstats = player:FindFirstChild("leaderstats")
     local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-    if not cash then return false end
+    if not cash then
+        playerSaveInProgress[player] = nil
+        return false
+    end
 
     local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
     local dataToSave = {
@@ -573,6 +587,9 @@ local function SavePlayerData(player)
             return dataToSave
         end)
     end)
+
+    -- Always release the per-player lock, including after a DataStore error.
+    playerSaveInProgress[player] = nil
 
     if not success then
         warn(string.format("[DataStore] Не удалось сохранить данные %s: %s", player.Name, tostring(err)))
