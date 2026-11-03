@@ -84,8 +84,35 @@ local playerInventories = {}
 local extractingPlayers = {}
 local playerActiveLoadouts = {}
 local playerUpgrades = {}
+-- Сохранять данные можно только после успешного чтения DataStore.
+local playerDataLoaded = {}
+local remoteActionTimes = {}
 local currentSuspiciousNoise = nil
 local guardStunnedUntil = 0
+
+local function canPerformAction(player, actionName, cooldown)
+    local now = os.clock()
+    local actions = remoteActionTimes[player]
+    if not actions then
+        actions = {}
+        remoteActionTimes[player] = actions
+    end
+
+    local lastAction = actions[actionName]
+    if lastAction and now - lastAction < cooldown then
+        return false
+    end
+
+    actions[actionName] = now
+    return true
+end
+
+local function isFiniteVector3(value)
+    return typeof(value) == "Vector3"
+        and value.X == value.X and math.abs(value.X) < 100000
+        and value.Y == value.Y and math.abs(value.Y) < 100000
+        and value.Z == value.Z and math.abs(value.Z) < 100000
+end
 
 -- ========================================================
 -- 4. ГЕНЕРАТОР КАРТЫ С УТОЛЩЕННЫМ ПОЛОМ И СКУПЩИКОМ
@@ -328,26 +355,49 @@ end
 -- 7. ВЫСТРЕЛ ТАЙЗЕРА И ДЫМ
 -- ========================================================
 fireTaserEvent.OnServerEvent:Connect(function(player, targetPos)
+    if currentPhaseValue.Value ~= "LootPhase" or not isFiniteVector3(targetPos) then return end
+    if not canPerformAction(player, "FireTaser", 1.0) then return end
+
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    local tool = char and char:FindFirstChild("Taser")
+    if not hrp or not humanoid or humanoid.Health <= 0 or not tool then return end
 
-    local tool = char:FindFirstChild("Taser")
-    if not tool then return end
+    local direction = targetPos - hrp.Position
+    if direction.Magnitude < 1 or direction.Magnitude > 50 then return end
 
-    if LootLogic.CanTaserHit(hrp.Position, targetPos, 45) then
-        local guard = workspace:FindFirstChild("GuardNPC")
-        if guard and (guard.PrimaryPart.Position - targetPos).Magnitude <= 10 then
-            guardStunnedUntil = os.clock() + 5.0
-            currentSuspiciousNoise = nil
-            local inv = playerInventories[player]
-            if inv then inventoryUpdatedEvent:FireClient(player, inv, "Охранник оглушен электрошоком на 5 секунд!") end
+    -- Проверяем попадание трассировкой на сервере, а не по координате от клиента.
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = { char }
+    local hit = workspace:Raycast(hrp.Position, direction, rayParams)
+
+    local guard = workspace:FindFirstChild("GuardNPC")
+    if guard and guard.PrimaryPart and hit and hit.Instance:IsDescendantOf(guard) then
+        guardStunnedUntil = os.clock() + 5.0
+        currentSuspiciousNoise = nil
+        local inv = playerInventories[player]
+        if inv then
+            inventoryUpdatedEvent:FireClient(player, inv, "Охранник оглушен электрошоком на 5 секунд!")
         end
     end
+
+    -- Валидный выстрел расходует тайзер даже при промахе.
     tool:Destroy()
 end)
 
-throwSmokeEvent.OnServerEvent:Connect(function(player, spawnPos)
+throwSmokeEvent.OnServerEvent:Connect(function(player)
+    if currentPhaseValue.Value ~= "LootPhase" then return end
+    if not canPerformAction(player, "ThrowSmoke", 10.0) then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid or humanoid.Health <= 0 then return end
+
+    -- Точка дыма рассчитывается сервером; клиент не может размещать дым где угодно.
+    local spawnPos = hrp.Position + hrp.CFrame.LookVector * 10
     local smokeCloud = Instance.new("Part")
     smokeCloud.Name = "SmokeCloud"
     smokeCloud.Shape = Enum.PartType.Ball
@@ -459,18 +509,38 @@ dropItemEvent.OnServerEvent:Connect(function(player, itemIndex)
 end)
 
 local function SavePlayerData(player)
-    if not dataStoreAvailable then return end
+    if not dataStoreAvailable then return false end
+    if not playerDataLoaded[player] then
+        warn(string.format("[DataStore] Пропуск сохранения %s: данные не были успешно загружены.", player.Name))
+        return false
+    end
+
     local leaderstats = player:FindFirstChild("leaderstats")
     local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-    local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+    if not cash then return false end
 
-    if cash then
-        local dataToSave = {
-            Cash = cash.Value,
-            Upgrades = upg
+    local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+    local dataToSave = {
+        Cash = math.max(0, math.floor(cash.Value)),
+        Upgrades = {
+            Pockets = math.clamp(math.floor(upg.Pockets or 0), 0, 3),
+            SmokeStarter = math.clamp(math.floor(upg.SmokeStarter or 0), 0, 2),
+            Battery = math.clamp(math.floor(upg.Battery or 0), 0, 3),
         }
-        pcall(function() PlayerDataStore:SetAsync("Player_" .. player.UserId, dataToSave) end)
+    }
+
+    local success, err = pcall(function()
+        PlayerDataStore:UpdateAsync("Player_" .. player.UserId, function()
+            return dataToSave
+        end)
+    end)
+
+    if not success then
+        warn(string.format("[DataStore] Не удалось сохранить данные %s: %s", player.Name, tostring(err)))
+        return false
     end
+
+    return true
 end
 
 buyUpgradeEvent.OnServerEvent:Connect(function(player, upgradeKey)
@@ -531,19 +601,39 @@ local function InitPlayer(player)
     cash.Parent = leaderstats
 
     playerUpgrades[player] = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+    playerDataLoaded[player] = false
 
     if dataStoreAvailable then
         local key = "Player_" .. player.UserId
         local success, savedData = pcall(function()
             return PlayerDataStore:GetAsync(key)
         end)
-        if success and savedData then
+
+        if success then
+            -- Успешный GetAsync без записи означает нового игрока, это тоже валидное состояние.
+            playerDataLoaded[player] = true
             if type(savedData) == "table" then
-                cash.Value = savedData.Cash or 0
-                playerUpgrades[player] = savedData.Upgrades or playerUpgrades[player]
+                if type(savedData.Cash) == "number" and savedData.Cash == savedData.Cash then
+                    cash.Value = math.clamp(math.floor(savedData.Cash), 0, 2000000000)
+                end
+
+                local savedUpgrades = savedData.Upgrades
+                if type(savedUpgrades) == "table" then
+                    playerUpgrades[player] = {
+                        Pockets = type(savedUpgrades.Pockets) == "number"
+                            and math.clamp(math.floor(savedUpgrades.Pockets), 0, 3) or 0,
+                        SmokeStarter = type(savedUpgrades.SmokeStarter) == "number"
+                            and math.clamp(math.floor(savedUpgrades.SmokeStarter), 0, 2) or 0,
+                        Battery = type(savedUpgrades.Battery) == "number"
+                            and math.clamp(math.floor(savedUpgrades.Battery), 0, 3) or 0,
+                    }
+                end
             elseif type(savedData) == "number" then
-                cash.Value = savedData
+                cash.Value = math.clamp(math.floor(savedData), 0, 2000000000)
             end
+        else
+            -- Не сохраняем нулевые значения поверх старых данных при временной ошибке чтения.
+            warn(string.format("[DataStore] Не удалось загрузить данные %s: %s", player.Name, tostring(savedData)))
         end
     end
 
@@ -594,13 +684,28 @@ Players.PlayerRemoving:Connect(function(player)
     playerInventories[player] = nil
     playerActiveLoadouts[player] = nil
     playerUpgrades[player] = nil
+    playerDataLoaded[player] = nil
+    remoteActionTimes[player] = nil
     extractingPlayers[player] = nil
 end)
 
 for _, p in Players:GetPlayers() do InitPlayer(p) end
 
-makeNoiseEvent.OnServerEvent:Connect(function(player, noisePos, noiseRadius)
-    currentSuspiciousNoise = { Position = noisePos, Radius = noiseRadius or 40, Timestamp = os.clock() }
+makeNoiseEvent.OnServerEvent:Connect(function(player)
+    if currentPhaseValue.Value ~= "LootPhase" then return end
+    if not canPerformAction(player, "MakeNoise", 0.75) then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid or humanoid.Health <= 0 then return end
+
+    -- Координаты и радиус задаёт сервер, а не клиент.
+    currentSuspiciousNoise = {
+        Position = hrp.Position,
+        Radius = 40,
+        Timestamp = os.clock()
+    }
 end)
 
 -- ========================================================
