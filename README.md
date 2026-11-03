@@ -6,7 +6,7 @@
 
 - [Roblox Studio](https://www.roblox.com/create)
 - [Aftman](https://github.com/LPGhatguy/aftman) — менеджер инструментов проекта
-- Rojo 7.7.1 (устанавливается через Aftman по файлу `NightRaid/aftman.toml`)
+- Rojo 7.7.1 и Selene 0.32.0 (устанавливаются через Aftman по файлу `NightRaid/aftman.toml`)
 
 ## Установка инструментов
 
@@ -37,6 +37,16 @@ rojo serve test.project.json
 
 После подключения Rojo Plugin запустите игру кнопкой Play и смотрите результат в окне Output. Сейчас набор содержит 37 проверок.
 
+## Статический анализ Luau
+
+Selene проверяет исходный код на распространённые ошибки и проблемные конструкции без запуска игры:
+
+```bash
+selene src
+```
+
+Настройки Roblox/Luau находятся в `NightRaid/selene.toml`.
+
 ## Сборка файлов place
 
 ```bash
@@ -44,4 +54,4 @@ rojo build default.project.json --output NightRaid.rbxlx
 rojo build test.project.json --output NightRaidTests.rbxlx
 ```
 
-GitHub Actions автоматически проверяет, что обе конфигурации Rojo собираются при изменениях в `NightRaid/**` и при Pull Request в `main`. Эта проверка собирает проекты, но не запускает игровой код в Roblox Studio.
+GitHub Actions автоматически запускает Selene и проверяет, что обе конфигурации Rojo собираются при изменениях в `NightRaid/**` и при Pull Request в `main`. Проверка Selene анализирует исходники, но не заменяет запуск игровых тестов в Roblox Studio.
