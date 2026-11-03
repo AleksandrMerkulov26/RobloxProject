@@ -512,26 +512,37 @@ end
 
 dropItemEvent.OnServerEvent:Connect(function(player, itemIndex)
     local inv = playerInventories[player]
+    if not inv or inv.Escaped then return end
+
+    -- RemoteEvent arguments are controlled by the client: accept only a valid array index.
+    if typeof(itemIndex) ~= "number"
+        or itemIndex ~= itemIndex
+        or itemIndex % 1 ~= 0
+        or itemIndex < 1
+        or itemIndex > #inv.Items then
+        return
+    end
+
+    -- Do not remove the item unless the server can place it back into the world.
+    local character = player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or humanoid.Health <= 0 or not hrp then return end
+
     local currentLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
     local upg = playerUpgrades[player] or { Pockets = 0 }
     local effectiveMaxWeight = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, upg.Pockets)
-    if not inv or inv.Escaped or not inv.Items[itemIndex] then return end
 
     local droppedItem = table.remove(inv.Items, itemIndex)
     inv.TotalWeight -= droppedItem.Weight
     inv.TotalValue -= droppedItem.Value
-
-    local character = player.Character
-    if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if humanoid then
-            humanoid.WalkSpeed = LootLogic.CalculateWalkSpeed(inv.TotalWeight, effectiveMaxWeight, currentLoadout.WalkSpeed, Config.MinWalkSpeed)
-        end
-        if hrp then
-            SpawnLootItem(droppedItem, hrp.Position + hrp.CFrame.LookVector * 3)
-        end
-    end
+    humanoid.WalkSpeed = LootLogic.CalculateWalkSpeed(
+        inv.TotalWeight,
+        effectiveMaxWeight,
+        currentLoadout.WalkSpeed,
+        Config.MinWalkSpeed
+    )
+    SpawnLootItem(droppedItem, hrp.Position + hrp.CFrame.LookVector * 3)
 
     inventoryUpdatedEvent:FireClient(player, inv, string.format("Выброшено: %s", droppedItem.Name))
 end)
