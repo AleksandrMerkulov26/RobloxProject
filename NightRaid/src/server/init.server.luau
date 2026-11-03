@@ -1083,4 +1083,34 @@ task.spawn(function()
     end
 end)
 
+-- Roblox may stop a server without every player leaving normally.
+-- Save all loaded player data during shutdown and wait briefly for writes to finish.
+game:BindToClose(function()
+    local playersToSave = Players:GetPlayers()
+    local pendingSaves = #playersToSave
+
+    if pendingSaves == 0 then
+        return
+    end
+
+    for _, player in playersToSave do
+        task.spawn(function()
+            SavePlayerData(player)
+            pendingSaves -= 1
+        end)
+    end
+
+    local deadline = os.clock() + 25
+    while pendingSaves > 0 and os.clock() < deadline do
+        task.wait(0.1)
+    end
+
+    if pendingSaves > 0 then
+        warn(string.format(
+            "[DataStore] Завершение сервера: не дождались сохранения %d игроков.",
+            pendingSaves
+        ))
+    end
+end)
+
 print("[СЕРВЕР]: Сервер готов. Network и цикл раундов функционируют.")
