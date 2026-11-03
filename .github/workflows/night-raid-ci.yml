@@ -25,7 +25,11 @@ jobs:
 
       - name: Install project tools
         working-directory: NightRaid
-        run: aftman install
+        run: aftman install --no-trust-check
+
+      - name: Run Selene
+        working-directory: NightRaid
+        run: selene src --allow-warnings
 
       - name: Build production game
         working-directory: NightRaid
