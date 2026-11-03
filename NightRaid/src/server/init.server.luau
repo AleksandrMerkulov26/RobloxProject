@@ -108,6 +108,8 @@ local playerUpgrades = {}
 local playerDataLoaded = {}
 -- Prevent overlapping DataStore writes for the same player.
 local playerSaveInProgress = {}
+-- Prevent laser Touched events from damaging one player repeatedly.
+local playerLaserHitTimes = {}
 local remoteActionTimes = {}
 local currentSuspiciousNoise = nil
 local guardStunnedUntil = 0
@@ -316,12 +318,19 @@ local function SpawnLasers()
             local char = hit.Parent
             local pHum = char and char:FindFirstChildOfClass("Humanoid")
             local player = Players:GetPlayerFromCharacter(char)
-            if pHum and player and not (playerInventories[player] and playerInventories[player].Escaped) then
-                pHum:TakeDamage(10)
-                currentSuspiciousNoise = { Position = laser.Position, Radius = 90, Timestamp = os.clock() }
-                local inv = playerInventories[player]
-                if inv then inventoryUpdatedEvent:FireClient(player, inv, "ТРЕВОГА: Пересечен лазер!") end
-            end
+            if not pHum or not player or pHum.Health <= 0 or player.Character ~= char then return end
+            if playerInventories[player] and playerInventories[player].Escaped then return end
+
+            local now = os.clock()
+            local lastHit = playerLaserHitTimes[player]
+            if lastHit and now - lastHit < 1 then return end
+
+            -- One laser crossing causes one damage event, not one per body part.
+            playerLaserHitTimes[player] = now
+            pHum:TakeDamage(10)
+            currentSuspiciousNoise = { Position = laser.Position, Radius = 90, Timestamp = now }
+            local inv = playerInventories[player]
+            if inv then inventoryUpdatedEvent:FireClient(player, inv, "ТРЕВОГА: Пересечен лазер!") end
         end)
     end
 end
@@ -742,6 +751,7 @@ Players.PlayerRemoving:Connect(function(player)
     playerUpgrades[player] = nil
     playerDataLoaded[player] = nil
     remoteActionTimes[player] = nil
+    playerLaserHitTimes[player] = nil
     extractingPlayers[player] = nil
 end)
 
