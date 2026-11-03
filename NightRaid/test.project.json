@@ -1,0 +1,16 @@
+{
+  "name": "NightRaidTests",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      }
+    },
+    "ServerScriptService": {
+      "TestRunner": {
+        "$path": "src/tests"
+      }
+    }
+  }
+}
