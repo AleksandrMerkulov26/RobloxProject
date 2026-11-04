@@ -33,6 +33,7 @@ local dropItemEvent = getOrCreateRemote("DropItem", "RemoteEvent")
 local selectLoadoutEvent = getOrCreateRemote("SelectLoadout", "RemoteEvent")
 local loadoutAppliedEvent = getOrCreateRemote("LoadoutApplied", "RemoteEvent")
 local loadoutsUpdatedEvent = getOrCreateRemote("LoadoutsUpdated", "RemoteEvent")
+local getOwnedLoadoutsFunction = getOrCreateRemote("GetOwnedLoadouts", "RemoteFunction")
 local makeNoiseEvent = getOrCreateRemote("MakeNoise", "RemoteEvent")
 local raidSummaryEvent = getOrCreateRemote("ShowRaidSummary", "RemoteEvent")
 local throwSmokeEvent = getOrCreateRemote("ThrowSmoke", "RemoteEvent")
@@ -462,6 +463,10 @@ end)
 -- ========================================================
 local function SendOwnedLoadouts(player)
     loadoutsUpdatedEvent:FireClient(player, playerOwnedLoadouts[player] or { Default = true })
+end
+
+getOwnedLoadoutsFunction.OnServerInvoke = function(player)
+    return playerOwnedLoadouts[player] or { Default = true }
 end
 
 local function ApplyLoadoutToPlayer(player, loadout)

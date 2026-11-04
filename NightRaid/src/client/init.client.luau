@@ -25,6 +25,7 @@ local extractionProgressEvent = networkFolder:WaitForChild("ExtractionProgress")
 local dropItemEvent = networkFolder:WaitForChild("DropItem")
 local selectLoadoutEvent = networkFolder:WaitForChild("SelectLoadout")
 local loadoutsUpdatedEvent = networkFolder:WaitForChild("LoadoutsUpdated")
+local getOwnedLoadoutsFunction = networkFolder:WaitForChild("GetOwnedLoadouts")
 local loadoutAppliedEvent = networkFolder:WaitForChild("LoadoutApplied")
 local makeNoiseEvent = networkFolder:WaitForChild("MakeNoise")
 local raidSummaryEvent = networkFolder:WaitForChild("ShowRaidSummary")
@@ -327,7 +328,7 @@ local function CreateMainUI()
     -- Карточка статуса
     local card = Instance.new("Frame")
     card.Parent = hud
-    card.Size = UDim2.new(0, 250, 0, 122)
+    card.Size = UDim2.new(0, 250, 0, 155)
     card.Position = UDim2.new(1, -265, 0, 20)
     card.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     card.BackgroundTransparency = 0.2
@@ -638,7 +639,7 @@ local function CreateMainUI()
     local loadoutsButton = Instance.new("TextButton")
     loadoutsButton.Parent = card
     loadoutsButton.Size = UDim2.new(0, 108, 0, 25)
-    loadoutsButton.Position = UDim2.new(1, -118, 0, 92)
+    loadoutsButton.Position = UDim2.new(1, -118, 0, 122)
     loadoutsButton.Text = "Комплекты [L]"
     loadoutsButton.TextSize = 11
     loadoutsButton.Font = Enum.Font.GothamBold
@@ -657,6 +658,14 @@ local function CreateMainUI()
             if loadoutModal.Visible then RefreshLoadoutsUI() end
         end
     end)
+
+    -- RemoteEvent может прийти до создания HUD, поэтому запрашиваем актуальное состояние.
+    local ownershipSuccess, savedOwnedLoadouts = pcall(function()
+        return getOwnedLoadoutsFunction:InvokeServer()
+    end)
+    if ownershipSuccess and type(savedOwnedLoadouts) == "table" then
+        ownedLoadouts = savedOwnedLoadouts
+    end
 
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
