@@ -325,7 +325,7 @@ local function CreateMainUI()
     -- Карточка статуса
     local card = Instance.new("Frame")
     card.Parent = hud
-    card.Size = UDim2.new(0, 250, 0, 90)
+    card.Size = UDim2.new(0, 250, 0, 122)
     card.Position = UDim2.new(1, -265, 0, 20)
     card.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     card.BackgroundTransparency = 0.2
@@ -333,7 +333,7 @@ local function CreateMainUI()
 
     local lootLabel = Instance.new("TextLabel")
     lootLabel.Parent = card
-    lootLabel.Size = UDim2.new(1, -20, 0, 26)
+    lootLabel.Size = UDim2.new(1, -20, 0, 20)
     lootLabel.Position = UDim2.new(0, 10, 0, 6)
     lootLabel.Text = "Добыча: $0"
     lootLabel.TextColor3 = Color3.fromRGB(0, 255, 180)
@@ -342,10 +342,88 @@ local function CreateMainUI()
     lootLabel.TextXAlignment = Enum.TextXAlignment.Left
     lootLabel.BackgroundTransparency = 1
 
+    local cashLabel = Instance.new("TextLabel")
+    cashLabel.Parent = card
+    cashLabel.Size = UDim2.new(1, -20, 0, 20)
+    cashLabel.Position = UDim2.new(0, 10, 0, 30)
+    cashLabel.Text = "Баланс: $0"
+    cashLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+    cashLabel.TextSize = 14
+    cashLabel.Font = Enum.Font.GothamBold
+    cashLabel.TextXAlignment = Enum.TextXAlignment.Left
+    cashLabel.BackgroundTransparency = 1
+
+    local leaderstats = player:WaitForChild("leaderstats", 10)
+    local cashValue = leaderstats and leaderstats:WaitForChild("Cash", 5)
+    if cashValue then
+        cashLabel.Text = string.format("Баланс: $%d", cashValue.Value)
+        cashValue:GetPropertyChangedSignal("Value"):Connect(function()
+            cashLabel.Text = string.format("Баланс: $%d", cashValue.Value)
+        end)
+    else
+        warn("[КЛИЕНТ]: Не удалось найти leaderstats.Cash для отображения баланса.")
+    end
+
+    local extractionLabel = Instance.new("TextLabel")
+    extractionLabel.Parent = card
+    extractionLabel.Size = UDim2.new(1, -20, 0, 20)
+    extractionLabel.Position = UDim2.new(0, 10, 0, 78)
+    extractionLabel.Text = "Эвакуация: не активна"
+    extractionLabel.TextColor3 = Color3.fromRGB(160, 170, 185)
+    extractionLabel.TextSize = 12
+    extractionLabel.BackgroundTransparency = 1
+
+    local summaryModal = Instance.new("Frame")
+    summaryModal.Parent = hud
+    summaryModal.Size = UDim2.new(0, 380, 0, 230)
+    summaryModal.AnchorPoint = Vector2.new(0.5, 0.5)
+    summaryModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    summaryModal.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
+    summaryModal.Visible = false
+    summaryModal.ZIndex = 70
+    Instance.new("UICorner", summaryModal).CornerRadius = UDim.new(0, 12)
+
+    local summaryTitle = Instance.new("TextLabel")
+    summaryTitle.Parent = summaryModal
+    summaryTitle.Size = UDim2.new(1, -30, 0, 42)
+    summaryTitle.Position = UDim2.new(0, 15, 0, 12)
+    summaryTitle.BackgroundTransparency = 1
+    summaryTitle.Font = Enum.Font.GothamBlack
+    summaryTitle.TextSize = 20
+    summaryTitle.TextColor3 = Color3.fromRGB(0, 255, 180)
+    summaryTitle.ZIndex = 71
+
+    local summaryDetails = Instance.new("TextLabel")
+    summaryDetails.Parent = summaryModal
+    summaryDetails.Size = UDim2.new(1, -40, 0, 105)
+    summaryDetails.Position = UDim2.new(0, 20, 0, 62)
+    summaryDetails.BackgroundTransparency = 1
+    summaryDetails.Font = Enum.Font.GothamMedium
+    summaryDetails.TextSize = 16
+    summaryDetails.TextColor3 = Color3.fromRGB(230, 235, 240)
+    summaryDetails.TextXAlignment = Enum.TextXAlignment.Left
+    summaryDetails.TextYAlignment = Enum.TextYAlignment.Center
+    summaryDetails.TextWrapped = true
+    summaryDetails.ZIndex = 71
+
+    local summaryClose = Instance.new("TextButton")
+    summaryClose.Parent = summaryModal
+    summaryClose.Size = UDim2.new(1, -40, 0, 36)
+    summaryClose.Position = UDim2.new(0, 20, 1, -48)
+    summaryClose.Text = "Продолжить"
+    summaryClose.BackgroundColor3 = Color3.fromRGB(35, 115, 95)
+    summaryClose.TextColor3 = Color3.fromRGB(255, 255, 255)
+    summaryClose.Font = Enum.Font.GothamBold
+    summaryClose.ZIndex = 71
+    Instance.new("UICorner", summaryClose).CornerRadius = UDim.new(0, 6)
+    summaryClose.MouseButton1Click:Connect(function()
+        summaryModal.Visible = false
+    end)
+
     local weightLabel = Instance.new("TextLabel")
     weightLabel.Parent = card
     weightLabel.Size = UDim2.new(1, -20, 0, 20)
-    weightLabel.Position = UDim2.new(0, 10, 0, 32)
+    weightLabel.Position = UDim2.new(0, 10, 0, 54)
     local effMaxW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
     weightLabel.Text = string.format("Вес: 0.0 / %.1f кг [B]", effMaxW)
     weightLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -357,7 +435,7 @@ local function CreateMainUI()
     local controlsHint = Instance.new("TextLabel")
     controlsHint.Parent = card
     controlsHint.Size = UDim2.new(1, -20, 0, 20)
-    controlsHint.Position = UDim2.new(0, 10, 0, 58)
+    controlsHint.Position = UDim2.new(0, 10, 0, 100)
     controlsHint.Text = "[E] Взять | [Q] Крюк | [F] Свет | [G] Дым"
     controlsHint.TextColor3 = Color3.fromRGB(150, 160, 180)
     controlsHint.TextSize = 11
@@ -568,6 +646,25 @@ local function CreateMainUI()
 
         if invModal.Visible then RefreshInventoryList() end
         if message then PlayLocalSFX("Pickup") end
+    end)
+
+    extractionProgressEvent.OnClientEvent:Connect(function(remaining, completed)
+        if completed then
+            extractionLabel.Text = "Эвакуация: успешно!"
+        elseif remaining < 0 then
+            extractionLabel.Text = "Эвакуация: прервана"
+        else
+            extractionLabel.Text = string.format("Эвакуация: %.1f сек", remaining)
+        end
+    end)
+
+    raidSummaryEvent.OnClientEvent:Connect(function(escaped, lootValue, itemCount, totalCash)
+        summaryTitle.Text = escaped and "ЭВАКУАЦИЯ УСПЕШНА" or "РЕЙД НЕ ЗАВЕРШЁН"
+        summaryTitle.TextColor3 = escaped and Color3.fromRGB(0, 255, 180) or Color3.fromRGB(255, 130, 100)
+        summaryDetails.Text = escaped
+            and string.format("Вынесено предметов: %d\nСтоимость добычи: $%d\nПостоянный баланс: $%d", itemCount, lootValue, totalCash)
+            or string.format("Эвакуация не состоялась.\nДобыча потеряна.\nПостоянный баланс: $%d", totalCash)
+        summaryModal.Visible = true
     end)
 end
 
