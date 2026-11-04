@@ -325,7 +325,7 @@ local function CreateMainUI()
     -- Карточка статуса
     local card = Instance.new("Frame")
     card.Parent = hud
-    card.Size = UDim2.new(0, 250, 0, 90)
+    card.Size = UDim2.new(0, 250, 0, 122)
     card.Position = UDim2.new(1, -265, 0, 20)
     card.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     card.BackgroundTransparency = 0.2
@@ -342,10 +342,32 @@ local function CreateMainUI()
     lootLabel.TextXAlignment = Enum.TextXAlignment.Left
     lootLabel.BackgroundTransparency = 1
 
+    local cashLabel = Instance.new("TextLabel")
+    cashLabel.Parent = card
+    cashLabel.Size = UDim2.new(1, -20, 0, 20)
+    cashLabel.Position = UDim2.new(0, 10, 0, 30)
+    cashLabel.Text = "Баланс: $0"
+    cashLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+    cashLabel.TextSize = 14
+    cashLabel.Font = Enum.Font.GothamBold
+    cashLabel.TextXAlignment = Enum.TextXAlignment.Left
+    cashLabel.BackgroundTransparency = 1
+
+    local leaderstats = player:WaitForChild("leaderstats", 10)
+    local cashValue = leaderstats and leaderstats:WaitForChild("Cash", 5)
+    if cashValue then
+        cashLabel.Text = string.format("Баланс: $%d", cashValue.Value)
+        cashValue:GetPropertyChangedSignal("Value"):Connect(function()
+            cashLabel.Text = string.format("Баланс: $%d", cashValue.Value)
+        end)
+    else
+        warn("[КЛИЕНТ]: Не удалось найти leaderstats.Cash для отображения баланса.")
+    end
+
     local extractionLabel = Instance.new("TextLabel")
     extractionLabel.Parent = card
     extractionLabel.Size = UDim2.new(1, -20, 0, 20)
-    extractionLabel.Position = UDim2.new(0, 10, 0, 58)
+    extractionLabel.Position = UDim2.new(0, 10, 0, 78)
     extractionLabel.Text = "Эвакуация: не активна"
     extractionLabel.TextColor3 = Color3.fromRGB(160, 170, 185)
     extractionLabel.TextSize = 12
@@ -401,7 +423,7 @@ local function CreateMainUI()
     local weightLabel = Instance.new("TextLabel")
     weightLabel.Parent = card
     weightLabel.Size = UDim2.new(1, -20, 0, 20)
-    weightLabel.Position = UDim2.new(0, 10, 0, 32)
+    weightLabel.Position = UDim2.new(0, 10, 0, 54)
     local effMaxW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
     weightLabel.Text = string.format("Вес: 0.0 / %.1f кг [B]", effMaxW)
     weightLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -413,7 +435,7 @@ local function CreateMainUI()
     local controlsHint = Instance.new("TextLabel")
     controlsHint.Parent = card
     controlsHint.Size = UDim2.new(1, -20, 0, 20)
-    controlsHint.Position = UDim2.new(0, 10, 0, 58)
+    controlsHint.Position = UDim2.new(0, 10, 0, 100)
     controlsHint.Text = "[E] Взять | [Q] Крюк | [F] Свет | [G] Дым"
     controlsHint.TextColor3 = Color3.fromRGB(150, 160, 180)
     controlsHint.TextSize = 11
@@ -639,8 +661,8 @@ local function CreateMainUI()
     raidSummaryEvent.OnClientEvent:Connect(function(escaped, lootValue, itemCount, totalCash)
         summaryTitle.Text = escaped and "ЭВАКУАЦИЯ УСПЕШНА" or "РЕЙД НЕ ЗАВЕРШЁН"
         summaryDetails.Text = escaped
-            and string.format("Вынесено предметов: %d\\nСтоимость добычи: $%d\\nПостоянный баланс: $%d", itemCount, lootValue, totalCash)
-            or string.format("Эвакуация не состоялась.\\nДобыча потеряна.\\nПостоянный баланс: $%d", totalCash)
+            and string.format("Вынесено предметов: %d\nСтоимость добычи: $%d\nПостоянный баланс: $%d", itemCount, lootValue, totalCash)
+            or string.format("Эвакуация не состоялась.\nДобыча потеряна.\nПостоянный баланс: $%d", totalCash)
         summaryModal.Visible = true
     end)
 end
