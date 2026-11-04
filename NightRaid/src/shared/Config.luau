@@ -26,7 +26,7 @@ local Config = {
         {
             Id = "Scout",
             Name = "Разведчик",
-            Cost = 350,
+            Cost = 1,
             WalkSpeed = 20,
             MaxWeight = 16,
             GrappleDistance = 210,
@@ -36,7 +36,7 @@ local Config = {
         {
             Id = "Mule",
             Name = "Тяжеловес",
-            Cost = 600,
+            Cost = 3,
             WalkSpeed = 14,
             MaxWeight = 50,
             GrappleDistance = 130,
