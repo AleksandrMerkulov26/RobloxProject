@@ -697,10 +697,15 @@ local function CreateTimerUI()
     phaseLabel.Font = Enum.Font.GothamBold
     phaseLabel.BackgroundTransparency = 1
 
+    -- A newer phase invalidates the timer task from the previous phase.
+    local timerGeneration = 0
+
     stateChangedEvent.OnClientEvent:Connect(function(phase, dur)
+        timerGeneration += 1
+        local currentGeneration = timerGeneration
         local finish = os.clock() + dur
         task.spawn(function()
-            while os.clock() < finish do
+            while currentGeneration == timerGeneration and os.clock() < finish do
                 local left = math.ceil(finish - os.clock())
                 if phase == "LobbyPhase" then
                     phaseLabel.Text = string.format("Убежище: %d сек", left)
