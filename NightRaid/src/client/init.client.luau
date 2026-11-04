@@ -24,6 +24,7 @@ local inventoryUpdatedEvent = networkFolder:WaitForChild("InventoryUpdated")
 local extractionProgressEvent = networkFolder:WaitForChild("ExtractionProgress")
 local dropItemEvent = networkFolder:WaitForChild("DropItem")
 local selectLoadoutEvent = networkFolder:WaitForChild("SelectLoadout")
+local loadoutsUpdatedEvent = networkFolder:WaitForChild("LoadoutsUpdated")
 local loadoutAppliedEvent = networkFolder:WaitForChild("LoadoutApplied")
 local makeNoiseEvent = networkFolder:WaitForChild("MakeNoise")
 local raidSummaryEvent = networkFolder:WaitForChild("ShowRaidSummary")
@@ -34,6 +35,7 @@ local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
 
 local currentInventoryData = { TotalValue = 0, TotalWeight = 0, Items = {} }
 local currentLoadout = Config.Loadouts[1]
+local ownedLoadouts = { Default = true }
 local currentUpgrades = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
 
 -- ==========================================
@@ -526,6 +528,144 @@ local function CreateMainUI()
         end
     end)
 
+    -- Комплекты: покупка навсегда, повторный выбор бесплатный.
+    local loadoutModal = Instance.new("Frame")
+    loadoutModal.Parent = hud
+    loadoutModal.Name = "LoadoutModal"
+    loadoutModal.Size = UDim2.new(0, 500, 0, 300)
+    loadoutModal.AnchorPoint = Vector2.new(0.5, 0.5)
+    loadoutModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    loadoutModal.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
+    loadoutModal.Visible = false
+    loadoutModal.ZIndex = 55
+    Instance.new("UICorner", loadoutModal).CornerRadius = UDim.new(0, 12)
+
+    local loadoutTitle = Instance.new("TextLabel")
+    loadoutTitle.Parent = loadoutModal
+    loadoutTitle.Size = UDim2.new(1, -60, 0, 42)
+    loadoutTitle.Position = UDim2.new(0, 18, 0, 8)
+    loadoutTitle.BackgroundTransparency = 1
+    loadoutTitle.Text = "КОМПЛЕКТЫ"
+    loadoutTitle.TextColor3 = Color3.fromRGB(240, 180, 40)
+    loadoutTitle.Font = Enum.Font.GothamBlack
+    loadoutTitle.TextSize = 18
+    loadoutTitle.TextXAlignment = Enum.TextXAlignment.Left
+    loadoutTitle.ZIndex = 56
+
+    local loadoutClose = Instance.new("TextButton")
+    loadoutClose.Parent = loadoutModal
+    loadoutClose.Size = UDim2.new(0, 32, 0, 32)
+    loadoutClose.Position = UDim2.new(1, -44, 0, 10)
+    loadoutClose.Text = "X"
+    loadoutClose.ZIndex = 56
+    loadoutClose.MouseButton1Click:Connect(function() loadoutModal.Visible = false end)
+
+    local loadoutScroll = Instance.new("ScrollingFrame")
+    loadoutScroll.Parent = loadoutModal
+    loadoutScroll.Size = UDim2.new(1, -32, 1, -62)
+    loadoutScroll.Position = UDim2.new(0, 16, 0, 52)
+    loadoutScroll.BackgroundTransparency = 1
+    loadoutScroll.BorderSizePixel = 0
+    loadoutScroll.CanvasSize = UDim2.new(0, 0, 0, #Config.Loadouts * 88)
+    loadoutScroll.ZIndex = 56
+    local loadoutLayout = Instance.new("UIListLayout")
+    loadoutLayout.Padding = UDim.new(0, 8)
+    loadoutLayout.Parent = loadoutScroll
+
+    local function RefreshLoadoutsUI()
+        for _, child in loadoutScroll:GetChildren() do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+
+        for index, loadout in ipairs(Config.Loadouts) do
+            local isOwned = ownedLoadouts[loadout.Id] == true
+            local isEquipped = currentLoadout.Id == loadout.Id
+            local row = Instance.new("Frame")
+            row.Parent = loadoutScroll
+            row.Size = UDim2.new(1, -8, 0, 78)
+            row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+            row.LayoutOrder = index
+            row.ZIndex = 57
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 7)
+
+            local info = Instance.new("TextLabel")
+            info.Parent = row
+            info.Size = UDim2.new(1, -150, 1, -8)
+            info.Position = UDim2.new(0, 12, 0, 4)
+            info.BackgroundTransparency = 1
+            info.Text = string.format("%s\n%s", loadout.Name, loadout.Description)
+            info.TextColor3 = Color3.fromRGB(235, 240, 245)
+            info.Font = Enum.Font.GothamMedium
+            info.TextSize = 12
+            info.TextWrapped = true
+            info.TextXAlignment = Enum.TextXAlignment.Left
+            info.ZIndex = 58
+
+            local action = Instance.new("TextButton")
+            action.Parent = row
+            action.Size = UDim2.new(0, 124, 0, 38)
+            action.Position = UDim2.new(1, -136, 0.5, -19)
+            action.Font = Enum.Font.GothamBold
+            action.TextSize = 12
+            action.ZIndex = 58
+            Instance.new("UICorner", action).CornerRadius = UDim.new(0, 6)
+
+            if isEquipped then
+                action.Text = "ЭКИПИРОВАН"
+                action.BackgroundColor3 = Color3.fromRGB(45, 105, 85)
+                action.TextColor3 = Color3.fromRGB(255, 255, 255)
+                action.Active = false
+                action.AutoButtonColor = false
+            elseif isOwned then
+                action.Text = "ВЫБРАТЬ"
+                action.BackgroundColor3 = Color3.fromRGB(45, 105, 155)
+                action.TextColor3 = Color3.fromRGB(255, 255, 255)
+                action.MouseButton1Click:Connect(function()
+                    selectLoadoutEvent:FireServer(loadout.Id)
+                end)
+            else
+                action.Text = string.format("КУПИТЬ $%d", loadout.Cost)
+                action.BackgroundColor3 = Color3.fromRGB(190, 115, 30)
+                action.TextColor3 = Color3.fromRGB(255, 255, 255)
+                action.MouseButton1Click:Connect(function()
+                    selectLoadoutEvent:FireServer(loadout.Id)
+                end)
+            end
+        end
+        loadoutScroll.CanvasSize = UDim2.new(0, 0, 0, #Config.Loadouts * 86)
+    end
+
+    local loadoutsButton = Instance.new("TextButton")
+    loadoutsButton.Parent = card
+    loadoutsButton.Size = UDim2.new(0, 108, 0, 25)
+    loadoutsButton.Position = UDim2.new(1, -118, 0, 92)
+    loadoutsButton.Text = "Комплекты [L]"
+    loadoutsButton.TextSize = 11
+    loadoutsButton.Font = Enum.Font.GothamBold
+    loadoutsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    loadoutsButton.BackgroundColor3 = Color3.fromRGB(45, 85, 125)
+    loadoutsButton.ZIndex = 10
+    Instance.new("UICorner", loadoutsButton).CornerRadius = UDim.new(0, 5)
+    loadoutsButton.MouseButton1Click:Connect(function()
+        loadoutModal.Visible = not loadoutModal.Visible
+        if loadoutModal.Visible then RefreshLoadoutsUI() end
+    end)
+
+    loadoutsUpdatedEvent.OnClientEvent:Connect(function(newOwnedLoadouts)
+        if type(newOwnedLoadouts) == "table" then
+            ownedLoadouts = newOwnedLoadouts
+            if loadoutModal.Visible then RefreshLoadoutsUI() end
+        end
+    end)
+
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.L then
+            loadoutModal.Visible = not loadoutModal.Visible
+            if loadoutModal.Visible then RefreshLoadoutsUI() end
+        end
+    end)
+
     -- Черный рынок
     local marketModal = Instance.new("Frame")
     marketModal.Parent = hud
@@ -636,6 +776,7 @@ local function CreateMainUI()
         spotBeam.Range = LootLogic.GetEffectiveFlashlightRange(75, currentUpgrades.Battery)
         local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
         weightLabel.Text = string.format("Вес: %.1f / %.1f кг [B]", currentInventoryData.TotalWeight, effW)
+        if loadoutModal.Visible then RefreshLoadoutsUI() end
     end)
 
     inventoryUpdatedEvent.OnClientEvent:Connect(function(invData, message)

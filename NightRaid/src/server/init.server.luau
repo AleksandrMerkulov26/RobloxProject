@@ -32,6 +32,7 @@ local extractionProgressEvent = getOrCreateRemote("ExtractionProgress", "RemoteE
 local dropItemEvent = getOrCreateRemote("DropItem", "RemoteEvent")
 local selectLoadoutEvent = getOrCreateRemote("SelectLoadout", "RemoteEvent")
 local loadoutAppliedEvent = getOrCreateRemote("LoadoutApplied", "RemoteEvent")
+local loadoutsUpdatedEvent = getOrCreateRemote("LoadoutsUpdated", "RemoteEvent")
 local makeNoiseEvent = getOrCreateRemote("MakeNoise", "RemoteEvent")
 local raidSummaryEvent = getOrCreateRemote("ShowRaidSummary", "RemoteEvent")
 local throwSmokeEvent = getOrCreateRemote("ThrowSmoke", "RemoteEvent")
@@ -103,6 +104,7 @@ smokesContainer.Name = "Smokes"
 local playerInventories = {}
 local extractingPlayers = {}
 local playerActiveLoadouts = {}
+local playerOwnedLoadouts = {}
 local playerUpgrades = {}
 -- Сохранять данные можно только после успешного чтения DataStore.
 local playerDataLoaded = {}
@@ -458,6 +460,10 @@ end)
 -- ========================================================
 -- 8. ИНВЕНТАРЬ И ПОДБОР ЛУТА
 -- ========================================================
+local function SendOwnedLoadouts(player)
+    loadoutsUpdatedEvent:FireClient(player, playerOwnedLoadouts[player] or { Default = true })
+end
+
 local function ApplyLoadoutToPlayer(player, loadout)
     playerActiveLoadouts[player] = loadout
     local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
@@ -582,8 +588,16 @@ local function SavePlayerData(player)
     end
 
     local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+    local ownedLoadouts = { Default = true }
+    for _, loadout in ipairs(Config.Loadouts) do
+        if loadout.Cost > 0 and playerOwnedLoadouts[player] and playerOwnedLoadouts[player][loadout.Id] == true then
+            ownedLoadouts[loadout.Id] = true
+        end
+    end
+
     local dataToSave = {
         Cash = math.max(0, math.floor(cash.Value)),
+        OwnedLoadouts = ownedLoadouts,
         Upgrades = {
             Pockets = math.clamp(math.floor(upg.Pockets or 0), 0, 3),
             SmokeStarter = math.clamp(math.floor(upg.SmokeStarter or 0), 0, 2),
@@ -633,26 +647,46 @@ buyUpgradeEvent.OnServerEvent:Connect(function(player, upgradeKey)
 end)
 
 selectLoadoutEvent.OnServerEvent:Connect(function(player, loadoutId)
+    if type(loadoutId) ~= "string" or #loadoutId > 32 then return end
+
     local targetLoadout = nil
-    for _, l in Config.Loadouts do
-        if l.Id == loadoutId then targetLoadout = l break end
+    for _, loadout in ipairs(Config.Loadouts) do
+        if loadout.Id == loadoutId then
+            targetLoadout = loadout
+            break
+        end
     end
     if not targetLoadout then return end
 
-    local leaderstats = player:FindFirstChild("leaderstats")
-    local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-    if not cash then return end
+    local owned = playerOwnedLoadouts[player]
+    if not owned then return end
 
-    if targetLoadout.Cost > 0 then
+    if not owned[targetLoadout.Id] then
+        local leaderstats = player:FindFirstChild("leaderstats")
+        local cash = leaderstats and leaderstats:FindFirstChild("Cash")
+        if not cash then return end
+
         local canBuy, newCash = LootLogic.CanAffordLoadout(cash.Value, targetLoadout.Cost)
-        if not canBuy then return end
+        if not canBuy then
+            inventoryUpdatedEvent:FireClient(player, playerInventories[player], "Недостаточно средств для покупки комплекта.")
+            return
+        end
+
         cash.Value = newCash
-        SavePlayerData(player)
+        owned[targetLoadout.Id] = true
+        if not SavePlayerData(player) then
+            -- Do not grant a purchase that could not be persisted.
+            owned[targetLoadout.Id] = nil
+            cash.Value = newCash + targetLoadout.Cost
+            SendOwnedLoadouts(player)
+            return
+        end
     end
 
     ApplyLoadoutToPlayer(player, targetLoadout)
+    SendOwnedLoadouts(player)
     local inv = playerInventories[player]
-    if inv then inventoryUpdatedEvent:FireClient(player, inv, string.format("Экипирован сет: %s!", targetLoadout.Name)) end
+    if inv then inventoryUpdatedEvent:FireClient(player, inv, string.format("Экипирован комплект: %s!", targetLoadout.Name)) end
 end)
 
 local function InitPlayer(player)
@@ -666,6 +700,7 @@ local function InitPlayer(player)
     cash.Parent = leaderstats
 
     playerUpgrades[player] = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+    playerOwnedLoadouts[player] = { Default = true }
     playerDataLoaded[player] = false
 
     if dataStoreAvailable then
@@ -680,6 +715,17 @@ local function InitPlayer(player)
             if type(savedData) == "table" then
                 if type(savedData.Cash) == "number" and savedData.Cash == savedData.Cash then
                     cash.Value = math.clamp(math.floor(savedData.Cash), 0, 2000000000)
+                end
+
+                local savedOwnedLoadouts = savedData.OwnedLoadouts
+                if type(savedOwnedLoadouts) == "table" then
+                    local owned = { Default = true }
+                    for _, loadout in ipairs(Config.Loadouts) do
+                        if loadout.Cost > 0 and savedOwnedLoadouts[loadout.Id] == true then
+                            owned[loadout.Id] = true
+                        end
+                    end
+                    playerOwnedLoadouts[player] = owned
                 end
 
                 local savedUpgrades = savedData.Upgrades
@@ -704,6 +750,7 @@ local function InitPlayer(player)
 
     playerInventories[player] = { TotalValue = 0, TotalWeight = 0, Items = {}, Escaped = false }
     ApplyLoadoutToPlayer(player, Config.Loadouts[1])
+    SendOwnedLoadouts(player)
 
     player.CharacterAdded:Connect(function(char)
         task.wait(0.2)
@@ -748,6 +795,7 @@ Players.PlayerRemoving:Connect(function(player)
     SavePlayerData(player)
     playerInventories[player] = nil
     playerActiveLoadouts[player] = nil
+    playerOwnedLoadouts[player] = nil
     playerUpgrades[player] = nil
     playerDataLoaded[player] = nil
     remoteActionTimes[player] = nil
