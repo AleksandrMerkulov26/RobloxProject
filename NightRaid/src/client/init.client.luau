@@ -333,7 +333,7 @@ local function CreateMainUI()
 
     local lootLabel = Instance.new("TextLabel")
     lootLabel.Parent = card
-    lootLabel.Size = UDim2.new(1, -20, 0, 26)
+    lootLabel.Size = UDim2.new(1, -20, 0, 20)
     lootLabel.Position = UDim2.new(0, 10, 0, 6)
     lootLabel.Text = "Добыча: $0"
     lootLabel.TextColor3 = Color3.fromRGB(0, 255, 180)
@@ -660,6 +660,7 @@ local function CreateMainUI()
 
     raidSummaryEvent.OnClientEvent:Connect(function(escaped, lootValue, itemCount, totalCash)
         summaryTitle.Text = escaped and "ЭВАКУАЦИЯ УСПЕШНА" or "РЕЙД НЕ ЗАВЕРШЁН"
+        summaryTitle.TextColor3 = escaped and Color3.fromRGB(0, 255, 180) or Color3.fromRGB(255, 130, 100)
         summaryDetails.Text = escaped
             and string.format("Вынесено предметов: %d\nСтоимость добычи: $%d\nПостоянный баланс: $%d", itemCount, lootValue, totalCash)
             or string.format("Эвакуация не состоялась.\nДобыча потеряна.\nПостоянный баланс: $%d", totalCash)
