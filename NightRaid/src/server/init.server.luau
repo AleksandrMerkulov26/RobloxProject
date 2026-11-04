@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
 local PathfindingService = game:GetService("PathfindingService")
 
@@ -57,10 +58,15 @@ Lighting.GlobalShadows = false
 -- ========================================================
 -- 2. БАЗА ДАННЫХ DATASTORE
 -- ========================================================
+-- Бесплатные комплекты включаются только в Roblox Studio.
+-- Для тестов используется отдельное хранилище, не затрагивающее данные игроков.
+local TEST_MODE = RunService:IsStudio()
+
 local PlayerDataStore = nil
 local dataStoreAvailable = false
 local dsSuccess = pcall(function()
-    PlayerDataStore = DataStoreService:GetDataStore("PlayerProgress_v3")
+    local dataStoreName = TEST_MODE and "PlayerProgress_Test_v1" or "PlayerProgress_v3"
+    PlayerDataStore = DataStoreService:GetDataStore(dataStoreName)
 end)
 if dsSuccess and PlayerDataStore then
     dataStoreAvailable = true
@@ -667,22 +673,27 @@ selectLoadoutEvent.OnServerEvent:Connect(function(player, loadoutId)
     if not owned then return end
 
     if not owned[targetLoadout.Id] then
-        local leaderstats = player:FindFirstChild("leaderstats")
-        local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-        if not cash then return end
+        if not TEST_MODE then
+            local leaderstats = player:FindFirstChild("leaderstats")
+            local cash = leaderstats and leaderstats:FindFirstChild("Cash")
+            if not cash then return end
 
-        local canBuy, newCash = LootLogic.CanAffordLoadout(cash.Value, targetLoadout.Cost)
-        if not canBuy then
-            inventoryUpdatedEvent:FireClient(player, playerInventories[player], "Недостаточно средств для покупки комплекта.")
-            return
+            local canBuy, newCash = LootLogic.CanAffordLoadout(cash.Value, targetLoadout.Cost)
+            if not canBuy then
+                inventoryUpdatedEvent:FireClient(player, playerInventories[player], "Недостаточно средств для покупки комплекта.")
+                return
+            end
+
+            cash.Value = newCash
         end
 
-        cash.Value = newCash
         owned[targetLoadout.Id] = true
-        if not SavePlayerData(player) then
-            -- Do not grant a purchase that could not be persisted.
+        if not SavePlayerData(player) and not TEST_MODE then
+            -- In production, never grant a purchase that could not be persisted.
             owned[targetLoadout.Id] = nil
-            cash.Value = newCash + targetLoadout.Cost
+            local leaderstats = player:FindFirstChild("leaderstats")
+            local cash = leaderstats and leaderstats:FindFirstChild("Cash")
+            if cash then cash.Value += targetLoadout.Cost end
             SendOwnedLoadouts(player)
             return
         end
