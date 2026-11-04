@@ -626,7 +626,7 @@ local function CreateMainUI()
                     selectLoadoutEvent:FireServer(loadout.Id)
                 end)
             else
-                action.Text = string.format("КУПИТЬ $%d", loadout.Cost)
+                action.Text = TEST_MODE and "ПОЛУЧИТЬ БЕСПЛАТНО" or string.format("КУПИТЬ $%d", loadout.Cost)
                 action.BackgroundColor3 = Color3.fromRGB(190, 115, 30)
                 action.TextColor3 = Color3.fromRGB(255, 255, 255)
                 action.MouseButton1Click:Connect(function()
