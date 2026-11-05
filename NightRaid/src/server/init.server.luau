@@ -1,5 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+-- Players must stay eliminated after death until the next raid starts.
+Players.CharacterAutoLoads = false
 local DataStoreService = game:GetService("DataStoreService")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
@@ -146,6 +148,17 @@ local function canPerformAction(player, actionName, cooldown)
 
     actions[actionName] = now
     return true
+end
+
+local function LoadCharacterForPlayer(player)
+    if player.Parent ~= Players then return end
+
+    local success, err = pcall(function()
+        player:LoadCharacterAsync()
+    end)
+    if not success then
+        warn(string.format("[Raid] Не удалось возродить игрока %s: %s", player.Name, tostring(err)))
+    end
 end
 
 local function isFiniteVector3(value)
@@ -818,6 +831,8 @@ local function InitPlayer(player)
 
         local hum = char:WaitForChild("Humanoid")
         local hrp = char:WaitForChild("HumanoidRootPart")
+        local activeLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
+        hum.WalkSpeed = activeLoadout.WalkSpeed
 
         hum.Died:Connect(function()
             local inv = playerInventories[player]
@@ -875,6 +890,9 @@ local function InitPlayer(player)
             end
         end)
     end)
+
+    -- With automatic respawning disabled, explicitly spawn the first character.
+    task.spawn(LoadCharacterForPlayer, player)
 end
 
 getRaidStatusFunction.OnServerInvoke = function(requestingPlayer)
@@ -1289,16 +1307,25 @@ local function ResetPlayersForRound()
         inv.Escaped = false
         ApplyLoadoutToPlayer(player, playerActiveLoadouts[player] or Config.Loadouts[1])
         inventoryUpdatedEvent:FireClient(player, inv, "Новый рейд! Загляните к Скупщику в убежище.")
+
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then
+            -- Dead players return only when the next lobby begins.
+            task.spawn(LoadCharacterForPlayer, player)
+        end
     end
 end
 
 task.spawn(function()
     while true do
+        -- Switch to the lobby before respawning eliminated players so their
+        -- CharacterAdded handler sends them to their personal hideout.
+        currentPhaseValue.Value = "LobbyPhase"
+        raidStartRequested = false
         ResetPlayersForRound()
 
         -- Лобби: игроки готовятся в убежищах и запускают рейд кнопкой.
-        currentPhaseValue.Value = "LobbyPhase"
-        raidStartRequested = false
         for _, p in Players:GetPlayers() do
             if p.Character then p.Character:PivotTo(GetHideoutSpawn(p) * CFrame.new(math.random(-6, 6), 0, math.random(-6, 6))) end
         end
