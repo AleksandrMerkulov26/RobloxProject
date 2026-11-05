@@ -604,6 +604,10 @@ local function SavePlayerData(player)
     local dataToSave = {
         Cash = math.max(0, math.floor(cash.Value)),
         OwnedLoadouts = ownedLoadouts,
+        Hideout = {
+            Version = 1,
+            Level = math.clamp(math.floor((playerHideouts[player] and playerHideouts[player].Data.Level) or 1), 1, 10),
+        },
         Upgrades = {
             Pockets = math.clamp(math.floor(upg.Pockets or 0), 0, 3),
             SmokeStarter = math.clamp(math.floor(upg.SmokeStarter or 0), 0, 2),
@@ -797,11 +801,6 @@ local function InitPlayer(player)
 
         local hum = char:WaitForChild("Humanoid")
         local hrp = char:WaitForChild("HumanoidRootPart")
-
-        -- Existing characters (for example after a script reload) also enter their own hideout.
-        if currentPhaseValue.Value == "LobbyPhase" then
-            char:PivotTo(GetHideoutSpawn(player))
-        end
 
         hum.Died:Connect(function()
             local inv = playerInventories[player]
