@@ -122,6 +122,7 @@ local playerLaserHitTimes = {}
 local remoteActionTimes = {}
 local currentSuspiciousNoise = nil
 local guardStunnedUntil = 0
+local guardAlertUntil = 0
 
 local function canPerformAction(player, actionName, cooldown)
     local now = os.clock()
@@ -844,6 +845,7 @@ end)
 local function CreateGuardNPC(spawnPos)
     local oldGuard = workspace:FindFirstChild("GuardNPC")
     if oldGuard then oldGuard:Destroy() end
+    guardAlertUntil = 0
 
     local model = Instance.new("Model")
     model.Name = "GuardNPC"
@@ -970,6 +972,9 @@ local function CreateGuardNPC(spawnPos)
                 continue
             end
 
+            local isAlerted = os.clock() < guardAlertUntil
+            local awareness = LootLogic.GetGuardAwareness(isAlerted)
+
             local targetChar = nil
             for _, player in Players:GetPlayers() do
                 local char = player.Character
@@ -982,7 +987,14 @@ local function CreateGuardNPC(spawnPos)
                         smokePositions, root.Position, playerRoot.Position, 14
                     )
                     if not smokeBlocksVision
-                        and LootLogic.IsPlayerDetected(root.Position, root.CFrame.LookVector, playerRoot.Position, 55, 0.35, 12) then
+                        and LootLogic.IsPlayerDetected(
+                            root.Position,
+                            root.CFrame.LookVector,
+                            playerRoot.Position,
+                            awareness.ViewDistance,
+                            awareness.FovDotThreshold,
+                            12
+                        ) then
                         local rayParams = RaycastParams.new()
                         rayParams.FilterDescendantsInstances = { model, char, smokesContainer }
                         rayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -997,6 +1009,7 @@ local function CreateGuardNPC(spawnPos)
             end
 
             if targetChar then
+                guardAlertUntil = math.max(guardAlertUntil, os.clock() + 12)
                 currentState = "Chase"
                 searchStartedAt = nil
                 searchMoveIssued = false
@@ -1022,16 +1035,17 @@ local function CreateGuardNPC(spawnPos)
                 if currentState ~= "Search" and currentSuspiciousNoise
                     and (os.clock() - currentSuspiciousNoise.Timestamp) < 6
                     and LootLogic.IsNoiseAudible(root.Position, currentSuspiciousNoise.Position, currentSuspiciousNoise.Radius) then
+                    guardAlertUntil = math.max(guardAlertUntil, os.clock() + 12)
                     currentState = "Investigate"
                     investigateTarget = currentSuspiciousNoise.Position
                     currentSuspiciousNoise = nil
                 end
 
                 if currentState == "Search" and lastKnownPlayerPosition then
-                    statusLabel.Text = "[ПОИСК ИГРОКА]"
-                    statusLabel.TextColor3 = Color3.fromRGB(255, 220, 30)
-                    light.Color = Color3.fromRGB(255, 200, 20)
-                    humanoid.WalkSpeed = 16
+                    statusLabel.Text = isAlerted and "[ТРЕВОГА: ПОИСК]" or "[ПОИСК ИГРОКА]"
+                    statusLabel.TextColor3 = isAlerted and Color3.fromRGB(255, 90, 30) or Color3.fromRGB(255, 220, 30)
+                    light.Color = isAlerted and Color3.fromRGB(255, 70, 20) or Color3.fromRGB(255, 200, 20)
+                    humanoid.WalkSpeed = awareness.SearchSpeed
                     if not searchMoveIssued then
                         searchMoveIssued = true
                         NavigateTo(lastKnownPlayerPosition)
@@ -1053,10 +1067,10 @@ local function CreateGuardNPC(spawnPos)
                         searchMoveIssued = false
                     end
                 elseif currentState == "Investigate" and investigateTarget then
-                    statusLabel.Text = "[ПОИСК ШУМА]"
-                    statusLabel.TextColor3 = Color3.fromRGB(255, 230, 0)
-                    light.Color = Color3.fromRGB(255, 220, 30)
-                    humanoid.WalkSpeed = 16
+                    statusLabel.Text = isAlerted and "[ТРЕВОГА: ШУМ]" or "[ПОИСК ШУМА]"
+                    statusLabel.TextColor3 = isAlerted and Color3.fromRGB(255, 90, 30) or Color3.fromRGB(255, 230, 0)
+                    light.Color = isAlerted and Color3.fromRGB(255, 70, 20) or Color3.fromRGB(255, 220, 30)
+                    humanoid.WalkSpeed = awareness.InvestigateSpeed
                     NavigateTo(investigateTarget)
                     if (root.Position - investigateTarget).Magnitude <= 8 then
                         task.wait(0.8)
@@ -1065,10 +1079,10 @@ local function CreateGuardNPC(spawnPos)
                     end
                 else
                     currentState = "Patrol"
-                    statusLabel.Text = "[ПАТРУЛИРОВАНИЕ]"
-                    statusLabel.TextColor3 = Color3.fromRGB(255, 160, 50)
-                    light.Color = Color3.fromRGB(255, 140, 40)
-                    humanoid.WalkSpeed = 13.5
+                    statusLabel.Text = isAlerted and "[ПОВЫШЕННАЯ ГОТОВНОСТЬ]" or "[ПАТРУЛИРОВАНИЕ]"
+                    statusLabel.TextColor3 = isAlerted and Color3.fromRGB(255, 100, 30) or Color3.fromRGB(255, 160, 50)
+                    light.Color = isAlerted and Color3.fromRGB(255, 70, 20) or Color3.fromRGB(255, 140, 40)
+                    humanoid.WalkSpeed = awareness.PatrolSpeed
                     local dest = waypoints[currentWaypointIndex]
                     NavigateTo(dest)
                     if (root.Position - dest).Magnitude <= 7 then
