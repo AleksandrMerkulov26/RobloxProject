@@ -779,6 +779,37 @@ local function InitPlayer(player)
 
         local hum = char:WaitForChild("Humanoid")
         local hrp = char:WaitForChild("HumanoidRootPart")
+
+        hum.Died:Connect(function()
+            local inv = playerInventories[player]
+            local isRaidActive = currentPhaseValue.Value == "LootPhase"
+                or currentPhaseValue.Value == "ExtractionPhase"
+            if not inv or inv.Escaped or not isRaidActive or #inv.Items == 0 then
+                return
+            end
+
+            -- Copy the server-owned inventory before clearing it.
+            local droppedItems = LootLogic.GetDeathDropItems(inv.Items)
+            local deathPosition = hrp.Position
+            for index, item in ipairs(droppedItems) do
+                local angle = (index / math.max(#droppedItems, 1)) * math.pi * 2
+                local offset = Vector3.new(math.cos(angle) * 3, 1.5, math.sin(angle) * 3)
+                SpawnLootItem(item, deathPosition + offset)
+            end
+
+            local lostValue = inv.TotalValue
+            inv.Items = {}
+            inv.TotalWeight = 0
+            inv.TotalValue = 0
+            extractingPlayers[player] = nil
+
+            inventoryUpdatedEvent:FireClient(
+                player,
+                inv,
+                string.format("Вы погибли! Потеряна вся добыча на сумму $%d.", lostValue)
+            )
+        end)
+
         local fallY = 0
         local inFreefall = false
 
