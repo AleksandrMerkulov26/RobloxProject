@@ -795,10 +795,8 @@ local function InitPlayer(player)
                 warn("[HideoutStation][SERVER] Rejected: not the hideout owner")
                 return
             end
-            if currentPhaseValue.Value ~= "LobbyPhase" then
-                warn("[HideoutStation][SERVER] Rejected: phase is not LobbyPhase")
-                return
-            end
+            -- Hideout stations are personal and can be used while other players
+            -- are still in the raid. The owner check above protects this interaction.
             print("[HideoutStation][SERVER] Sending OpenHideoutStation:", stationName)
             openHideoutStationEvent:FireClient(player, stationName)
         end)
