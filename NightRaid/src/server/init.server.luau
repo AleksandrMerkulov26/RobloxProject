@@ -713,6 +713,7 @@ local function InitPlayer(player)
     playerUpgrades[player] = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
     playerOwnedLoadouts[player] = { Default = true }
     playerDataLoaded[player] = false
+    local loadedPlayerData = nil
 
     if dataStoreAvailable then
         local key = "Player_" .. player.UserId
@@ -721,6 +722,7 @@ local function InitPlayer(player)
         end)
 
         if success then
+            loadedPlayerData = savedData
             -- Успешный GetAsync без записи означает нового игрока, это тоже валидное состояние.
             playerDataLoaded[player] = true
             if type(savedData) == "table" then
@@ -760,19 +762,12 @@ local function InitPlayer(player)
     end
 
     local savedHideout = nil
-    -- Hideout progress is loaded independently from the visual model.
-    if dataStoreAvailable and playerDataLoaded[player] then
-        local key = "Player_" .. player.UserId
-        local success, savedData = pcall(function()
-            return PlayerDataStore:GetAsync(key)
-        end)
-        if success and type(savedData) == "table" and type(savedData.Hideout) == "table" then
-            savedHideout = {
-                Version = 1,
-                Level = type(savedData.Hideout.Level) == "number"
-                    and math.clamp(math.floor(savedData.Hideout.Level), 1, 10) or 1,
-            }
-        end
+    if type(loadedPlayerData) == "table" and type(loadedPlayerData.Hideout) == "table" then
+        savedHideout = {
+            Version = 1,
+            Level = type(loadedPlayerData.Hideout.Level) == "number"
+                and math.clamp(math.floor(loadedPlayerData.Hideout.Level), 1, 10) or 1,
+        }
     end
     local slot = AllocateHideoutSlot(player)
     local hideoutData = savedHideout or { Version = 1, Level = 1 }
@@ -802,6 +797,11 @@ local function InitPlayer(player)
 
         local hum = char:WaitForChild("Humanoid")
         local hrp = char:WaitForChild("HumanoidRootPart")
+
+        -- Existing characters (for example after a script reload) also enter their own hideout.
+        if currentPhaseValue.Value == "LobbyPhase" then
+            char:PivotTo(GetHideoutSpawn(player))
+        end
 
         hum.Died:Connect(function()
             local inv = playerInventories[player]
