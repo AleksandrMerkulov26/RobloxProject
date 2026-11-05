@@ -877,7 +877,16 @@ local function InitPlayer(player)
 end
 
 getRaidStatusFunction.OnServerInvoke = function(requestingPlayer)
-    if not playerHideouts[requestingPlayer] then
+    local hideout = playerHideouts[requestingPlayer]
+    local character = requestingPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local commandZone = hideout and hideout.Model and hideout.Model:FindFirstChild("Command")
+    local commandConsole = commandZone and commandZone:FindFirstChild("MainStation")
+
+    -- Require the caller to be physically at their own command console.
+    if not hideout or not hideout.Model or not hideout.Model.Parent
+        or not root or not commandConsole
+        or (root.Position - commandConsole.Position).Magnitude > 18 then
         return {}
     end
 
