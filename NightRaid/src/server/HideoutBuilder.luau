@@ -150,10 +150,13 @@ function HideoutBuilder.Build(userId, slot, savedData)
     addLight(model, "CeilingLight_C", COLORS.warm, 3.5, 38, Vector3.new(x - 16, y + 19, z + 13))
     addLight(model, "CeilingLight_D", COLORS.warm, 3.5, 38, Vector3.new(x + 16, y + 19, z + 13))
 
-    addZone(model, "Armory", "АРСЕНАЛ", Vector3.new(x - 17, y + 2.2, z - 10), COLORS.warm, "Armory")
-    addZone(model, "Workshop", "МАСТЕРСКАЯ", Vector3.new(x + 17, y + 2.2, z - 10), COLORS.blue, "Workshop")
+    local stationPrompts = {}
+    local _, armoryPrompt = addZone(model, "Armory", "АРСЕНАЛ", Vector3.new(x - 17, y + 2.2, z - 10), COLORS.warm, "Armory")
+    local _, workshopPrompt = addZone(model, "Workshop", "МАСТЕРСКАЯ", Vector3.new(x + 17, y + 2.2, z - 10), COLORS.blue, "Workshop")
     addZone(model, "Command", "УПРАВЛЕНИЕ", Vector3.new(x - 17, y + 2.2, z + 13), COLORS.green, "Command")
     addZone(model, "Living", "ЖИЛОЙ СЕКТОР", Vector3.new(x + 17, y + 2.2, z + 13), Color3.fromRGB(185, 140, 220), "Living")
+    stationPrompts.Armory = armoryPrompt
+    stationPrompts.Workshop = workshopPrompt
 
     local counter = createPart(model, "DealerCounter", Vector3.new(8, 3, 2), Vector3.new(x, y + 3.5, z - 23), Color3.fromRGB(75, 49, 31), Enum.Material.Wood)
     local prompt = Instance.new("ProximityPrompt")
@@ -166,7 +169,7 @@ function HideoutBuilder.Build(userId, slot, savedData)
     prompt.Parent = counter
 
     local spawnCFrame = CFrame.new(x, y + 5, z + 20)
-    return model, spawnCFrame, prompt
+    return model, spawnCFrame, prompt, stationPrompts
 end
 
 return HideoutBuilder
