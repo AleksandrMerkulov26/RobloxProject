@@ -66,6 +66,27 @@ function LootLogic.IsNoiseAudible(guardPos: Vector3, noisePos: Vector3, noiseRad
     return (guardPos - noisePos).Magnitude <= noiseRadius
 end
 
+-- Alert mode improves awareness and movement for a short time after a sighting or loud noise.
+function LootLogic.GetGuardAwareness(isAlerted: boolean)
+    if isAlerted then
+        return {
+            ViewDistance = 70,
+            FovDotThreshold = 0.2,
+            PatrolSpeed = 16,
+            SearchSpeed = 18,
+            InvestigateSpeed = 18
+        }
+    end
+
+    return {
+        ViewDistance = 55,
+        FovDotThreshold = 0.35,
+        PatrolSpeed = 13.5,
+        SearchSpeed = 16,
+        InvestigateSpeed = 16
+    }
+end
+
 function LootLogic.IsVisionBlockedBySmoke(smokePositions, guardPos: Vector3, playerPos: Vector3, smokeRadius: number): boolean
     local rayDir = playerPos - guardPos
     local rayLen = rayDir.Magnitude
