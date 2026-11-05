@@ -106,7 +106,19 @@ local function addZone(parent, name, title, center, accent, stationType)
     end
 
     addLight(zone, "StationLight", accent, 2.2, 24, center + Vector3.new(0, 9, 0))
-    return zone
+
+    -- Functional station prompt; server validates that only the owner can use it.
+    local stationPrompt = Instance.new("ProximityPrompt")
+    stationPrompt.Name = "StationPrompt"
+    stationPrompt.ActionText = "Открыть"
+    stationPrompt.ObjectText = title
+    stationPrompt.KeyboardKeyCode = Enum.KeyCode.E
+    stationPrompt.HoldDuration = 0
+    stationPrompt.MaxActivationDistance = 10
+    stationPrompt.RequiresLineOfSight = false
+    stationPrompt.Parent = console
+
+    return zone, stationPrompt
 end
 
 function HideoutBuilder.Build(userId, slot, savedData)
