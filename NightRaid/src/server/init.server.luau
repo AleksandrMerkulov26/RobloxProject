@@ -41,6 +41,7 @@ local throwSmokeEvent = getOrCreateRemote("ThrowSmoke", "RemoteEvent")
 local fireTaserEvent = getOrCreateRemote("FireTaser", "RemoteEvent")
 local buyUpgradeEvent = getOrCreateRemote("BuyUpgrade", "RemoteEvent")
 local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
+local openHideoutStationEvent = getOrCreateRemote("OpenHideoutStation", "RemoteEvent")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
@@ -775,7 +776,7 @@ local function InitPlayer(player)
     end
     local slot = AllocateHideoutSlot(player)
     local hideoutData = savedHideout or { Version = 1, Level = 1 }
-    local hideoutModel, spawnCFrame, dealerPrompt = HideoutBuilder.Build(player.UserId, slot, hideoutData)
+    local hideoutModel, spawnCFrame, dealerPrompt, stationPrompts = HideoutBuilder.Build(player.UserId, slot, hideoutData)
     playerHideouts[player] = {
         Model = hideoutModel,
         SpawnCFrame = spawnCFrame,
@@ -786,6 +787,20 @@ local function InitPlayer(player)
         local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
         upgradesUpdatedEvent:FireClient(player, upg, true)
     end)
+
+    for stationName, stationPrompt in stationPrompts do
+        stationPrompt.Triggered:Connect(function(triggeringPlayer)
+            print("[HideoutStation][SERVER] Triggered:", stationName, "By:", triggeringPlayer.Name, "Owner:", player.Name, "Phase:", currentPhaseValue.Value)
+            if triggeringPlayer ~= player then
+                warn("[HideoutStation][SERVER] Rejected: not the hideout owner")
+                return
+            end
+            -- Hideout stations are personal and can be used while other players
+            -- are still in the raid. The owner check above protects this interaction.
+            print("[HideoutStation][SERVER] Sending OpenHideoutStation:", stationName)
+            openHideoutStationEvent:FireClient(player, stationName)
+        end)
+    end
 
     playerInventories[player] = { TotalValue = 0, TotalWeight = 0, Items = {}, Escaped = false }
     ApplyLoadoutToPlayer(player, Config.Loadouts[1])
