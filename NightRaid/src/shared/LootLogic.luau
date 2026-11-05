@@ -62,6 +62,14 @@ function LootLogic.IsPlayerDetected(guardPos: Vector3, guardLookVector: Vector3,
     return dot >= fovDotThreshold
 end
 
+function LootLogic.GetDeathDropItems(items)
+    local droppedItems = {}
+    for _, item in ipairs(items) do
+        table.insert(droppedItems, item)
+    end
+    return droppedItems
+end
+
 function LootLogic.IsNoiseAudible(guardPos: Vector3, noisePos: Vector3, noiseRadius: number): boolean
     return (guardPos - noisePos).Magnitude <= noiseRadius
 end

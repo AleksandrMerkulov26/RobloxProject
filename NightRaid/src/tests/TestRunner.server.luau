@@ -106,6 +106,15 @@ local function RunSuite()
     -- БЛОК 6: РЕАКЦИЯ НА ШУМ
     -- ----------------------------------------------------
     print("\n-- [6. Слух и Детекция шума] --")
+    local deathDropSource = {
+        { Name = "Золотые часы", Weight = 1.5, Value = 150 },
+        { Name = "Слиток", Weight = 8.0, Value = 450 }
+    }
+    local deathDropItems = LootLogic.GetDeathDropItems(deathDropSource)
+    AssertTest("При смерти копируются все предметы инвентаря", #deathDropItems, 2)
+    AssertTest("Порядок предметов при выбросе сохраняется", deathDropItems[1].Name, "Золотые часы")
+    AssertTest("Подготовка выброса не очищает исходный инвентарь", #deathDropSource, 2)
+
     local noiseNearby = Vector3.new(20, 3, 0) -- Дистанция 20 studs
     AssertTest("Шум в радиусе слышимости (20 <= 40) -> Услышан", LootLogic.IsNoiseAudible(guardPos, noiseNearby, 40), true)
 
