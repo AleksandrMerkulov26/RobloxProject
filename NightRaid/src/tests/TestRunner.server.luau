@@ -132,11 +132,6 @@ local function RunSuite()
     AssertTest("Дым между охранником и игроком -> Зрение заблокировано",
         LootLogic.IsVisionBlockedBySmoke(smokeAcrossSightline, guardPos, Vector3.new(0, 3, -25), 10), true)
 
-    -- Дым между охранником и игроком также должен блокировать обзор.
-    local smokeAcrossSightline = { Vector3.new(0, 3, -12) }
-    AssertTest("Дым между охранником и игроком -> Зрение заблокировано",
-        LootLogic.IsVisionBlockedBySmoke(smokeAcrossSightline, guardPos, Vector3.new(0, 3, -25), 10), true)
-
     AssertTest("Выстрел тайзера с 25 studs (макс 45) -> Попадание", LootLogic.CanTaserHit(Vector3.zero, Vector3.new(0, 0, 25), 45), true)
     AssertTest("Выстрел тайзера с 60 studs (макс 45) -> Промах по дальности", LootLogic.CanTaserHit(Vector3.zero, Vector3.new(0, 0, 60), 45), false)
 
