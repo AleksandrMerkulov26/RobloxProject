@@ -42,6 +42,7 @@ local fireTaserEvent = getOrCreateRemote("FireTaser", "RemoteEvent")
 local buyUpgradeEvent = getOrCreateRemote("BuyUpgrade", "RemoteEvent")
 local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
 local openHideoutStationEvent = getOrCreateRemote("OpenHideoutStation", "RemoteEvent")
+local getRaidStatusFunction = getOrCreateRemote("GetRaidStatus", "RemoteFunction")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
@@ -873,6 +874,49 @@ local function InitPlayer(player)
             end
         end)
     end)
+end
+
+getRaidStatusFunction.OnServerInvoke = function(requestingPlayer)
+    if not playerHideouts[requestingPlayer] then
+        return {}
+    end
+
+    local result = {}
+    local phase = currentPhaseValue.Value
+    for _, targetPlayer in Players:GetPlayers() do
+        if targetPlayer ~= requestingPlayer then
+            local inventory = playerInventories[targetPlayer]
+            local character = targetPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local isAlive = humanoid ~= nil and humanoid.Health > 0
+            local escaped = inventory ~= nil and inventory.Escaped == true
+            local status = "Ожидает начала рейда"
+            local canSpectate = false
+
+            if escaped then
+                status = "Эвакуировался"
+            elseif phase == "LootPhase" or phase == "ExtractionPhase" then
+                if isAlive then
+                    status = "В рейде"
+                    canSpectate = true
+                else
+                    status = "Выбыл"
+                end
+            end
+
+            table.insert(result, {
+                UserId = targetPlayer.UserId,
+                DisplayName = targetPlayer.DisplayName,
+                Status = status,
+                CanSpectate = canSpectate,
+            })
+        end
+    end
+
+    table.sort(result, function(a, b)
+        return a.DisplayName < b.DisplayName
+    end)
+    return result
 end
 
 Players.PlayerAdded:Connect(InitPlayer)
