@@ -1029,8 +1029,16 @@ local function CreateTimerUI()
     startRaidButton.MouseButton1Click:Connect(function()
         if currentPhaseValue.Value ~= "LobbyPhase" then return end
         startRaidButton.Active = false
-        startRaidButton.Text = "ЗАПУСК..."
+        startRaidButton.Text = "ЗАПРОС..."
         startRaidEvent:FireServer()
+        -- If the server rejects the request (for example, outside the hideout),
+        -- allow the player to try again after moving to the correct location.
+        task.delay(1.5, function()
+            if currentPhaseValue.Value == "LobbyPhase" then
+                startRaidButton.Active = true
+                startRaidButton.Text = "НАЧАТЬ РЕЙД"
+            end
+        end)
     end)
 
     -- A newer phase invalidates the timer task from the previous phase.
