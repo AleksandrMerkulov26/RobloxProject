@@ -44,6 +44,7 @@ local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
+local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
 
 -- Настройки освещения склада
 Lighting.ClockTime = 0
@@ -117,6 +118,9 @@ local playerUpgrades = {}
 local playerDataLoaded = {}
 -- Prevent overlapping DataStore writes for the same player.
 local playerSaveInProgress = {}
+local playerHideouts = {}
+local playerHideoutSlots = {}
+local hideoutSlotOwners = {}
 -- Prevent laser Touched events from damaging one player repeatedly.
 local playerLaserHitTimes = {}
 local remoteActionTimes = {}
@@ -264,38 +268,7 @@ local function BuildFacility()
     table.insert(lootSpawnPoints, Vector3.new(60, 1.5, -30))
     table.insert(lootSpawnPoints, Vector3.new(65, 1.5, -35))
 
-    -- Убежище лобби (Safehouse на Y = 117)
-    createWall("SafeFloor", Vector3.new(40, 6, 40), Vector3.new(0, 117, 0), Color3.fromRGB(25, 28, 35), Enum.Material.SmoothPlastic)
-    createWall("SafeWallN", Vector3.new(40, 12, 2), Vector3.new(0, 126, -20), Color3.fromRGB(35, 40, 48))
-    createWall("SafeWallS", Vector3.new(40, 12, 2), Vector3.new(0, 126, 20), Color3.fromRGB(35, 40, 48))
-    createWall("SafeWallW", Vector3.new(2, 12, 40), Vector3.new(-20, 126, 0), Color3.fromRGB(35, 40, 48))
-    createWall("SafeWallE", Vector3.new(2, 12, 40), Vector3.new(20, 126, 0), Color3.fromRGB(35, 40, 48))
-    createWall("SafeRoof", Vector3.new(40, 2, 40), Vector3.new(0, 132, 0), Color3.fromRGB(20, 22, 26))
-
-    local safeLight = Instance.new("PointLight")
-    safeLight.Range = 35
-    safeLight.Brightness = 2.5
-    safeLight.Color = Color3.fromRGB(220, 240, 255)
-    safeLight.Shadows = false
-    safeLight.Parent = workspace
-
-    -- NPC Скупщика (Черный рынок)
-    local counter = createWall("DealerCounter", Vector3.new(12, 4, 3), Vector3.new(0, 122, -14), Color3.fromRGB(40, 30, 20), Enum.Material.Wood)
-    createWall("DealerNPC", Vector3.new(2, 5, 2), Vector3.new(0, 123.5, -16.5), Color3.fromRGB(15, 15, 20), Enum.Material.SmoothPlastic)
-    
-    local dealerPrompt = Instance.new("ProximityPrompt")
-    dealerPrompt.ActionText = "Чёрный Рынок"
-    dealerPrompt.ObjectText = "Скупщик"
-    dealerPrompt.KeyboardKeyCode = Enum.KeyCode.E
-    dealerPrompt.HoldDuration = 0
-    dealerPrompt.MaxActivationDistance = 9
-    dealerPrompt.RequiresLineOfSight = false
-    dealerPrompt.Parent = counter
-
-    dealerPrompt.Triggered:Connect(function(player)
-        local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
-        upgradesUpdatedEvent:FireClient(player, upg, true)
-    end)
+    -- Персональные убежища строятся HideoutBuilder для каждого игрока.
 
     return lootSpawnPoints
 end
@@ -576,6 +549,27 @@ dropItemEvent.OnServerEvent:Connect(function(player, itemIndex)
     inventoryUpdatedEvent:FireClient(player, inv, string.format("Выброшено: %s", droppedItem.Name))
 end)
 
+local function GetHideoutSpawn(player)
+    local hideout = playerHideouts[player]
+    return hideout and hideout.SpawnCFrame or CFrame.new(0, 123, 0)
+end
+
+local function AllocateHideoutSlot(player)
+    for slot = 1, math.max(Players.MaxPlayers, 1) do
+        if not hideoutSlotOwners[slot] then
+            hideoutSlotOwners[slot] = player
+            playerHideoutSlots[player] = slot
+            return slot
+        end
+    end
+    -- Server capacity is normally bounded by MaxPlayers; this fallback avoids a nil slot.
+    local slot = Players.MaxPlayers + 1
+    while hideoutSlotOwners[slot] do slot += 1 end
+    hideoutSlotOwners[slot] = player
+    playerHideoutSlots[player] = slot
+    return slot
+end
+
 local function SavePlayerData(player)
     if not dataStoreAvailable then return false end
 
@@ -610,6 +604,10 @@ local function SavePlayerData(player)
     local dataToSave = {
         Cash = math.max(0, math.floor(cash.Value)),
         OwnedLoadouts = ownedLoadouts,
+        Hideout = {
+            Version = 1,
+            Level = math.clamp(math.floor((playerHideouts[player] and playerHideouts[player].Data.Level) or 1), 1, 10),
+        },
         Upgrades = {
             Pockets = math.clamp(math.floor(upg.Pockets or 0), 0, 3),
             SmokeStarter = math.clamp(math.floor(upg.SmokeStarter or 0), 0, 2),
@@ -719,6 +717,7 @@ local function InitPlayer(player)
     playerUpgrades[player] = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
     playerOwnedLoadouts[player] = { Default = true }
     playerDataLoaded[player] = false
+    local loadedPlayerData = nil
 
     if dataStoreAvailable then
         local key = "Player_" .. player.UserId
@@ -727,6 +726,7 @@ local function InitPlayer(player)
         end)
 
         if success then
+            loadedPlayerData = savedData
             -- Успешный GetAsync без записи означает нового игрока, это тоже валидное состояние.
             playerDataLoaded[player] = true
             if type(savedData) == "table" then
@@ -765,6 +765,28 @@ local function InitPlayer(player)
         end
     end
 
+    local savedHideout = nil
+    if type(loadedPlayerData) == "table" and type(loadedPlayerData.Hideout) == "table" then
+        savedHideout = {
+            Version = 1,
+            Level = type(loadedPlayerData.Hideout.Level) == "number"
+                and math.clamp(math.floor(loadedPlayerData.Hideout.Level), 1, 10) or 1,
+        }
+    end
+    local slot = AllocateHideoutSlot(player)
+    local hideoutData = savedHideout or { Version = 1, Level = 1 }
+    local hideoutModel, spawnCFrame, dealerPrompt = HideoutBuilder.Build(player.UserId, slot, hideoutData)
+    playerHideouts[player] = {
+        Model = hideoutModel,
+        SpawnCFrame = spawnCFrame,
+        Data = hideoutData,
+    }
+    dealerPrompt.Triggered:Connect(function(triggeringPlayer)
+        if triggeringPlayer ~= player then return end
+        local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+        upgradesUpdatedEvent:FireClient(player, upg, true)
+    end)
+
     playerInventories[player] = { TotalValue = 0, TotalWeight = 0, Items = {}, Escaped = false }
     ApplyLoadoutToPlayer(player, Config.Loadouts[1])
     SendOwnedLoadouts(player)
@@ -772,7 +794,7 @@ local function InitPlayer(player)
     player.CharacterAdded:Connect(function(char)
         task.wait(0.2)
         if currentPhaseValue.Value == "LobbyPhase" then
-            char:PivotTo(CFrame.new(0, 123, 0))
+            char:PivotTo(GetHideoutSpawn(player))
         else
             char:PivotTo(CFrame.new(0, 3, -65))
         end
@@ -841,6 +863,12 @@ end
 Players.PlayerAdded:Connect(InitPlayer)
 Players.PlayerRemoving:Connect(function(player)
     SavePlayerData(player)
+    local hideout = playerHideouts[player]
+    if hideout and hideout.Model then hideout.Model:Destroy() end
+    local slot = playerHideoutSlots[player]
+    if slot then hideoutSlotOwners[slot] = nil end
+    playerHideouts[player] = nil
+    playerHideoutSlots[player] = nil
     playerInventories[player] = nil
     playerActiveLoadouts[player] = nil
     playerOwnedLoadouts[player] = nil
@@ -1181,7 +1209,7 @@ task.spawn(function()
         -- Фаза Лобби
         currentPhaseValue.Value = "LobbyPhase"
         for _, p in Players:GetPlayers() do
-            if p.Character then p.Character:PivotTo(CFrame.new(math.random(-8, 8), 123, math.random(-8, 8))) end
+            if p.Character then p.Character:PivotTo(GetHideoutSpawn(p) * CFrame.new(math.random(-6, 6), 0, math.random(-6, 6))) end
         end
         stateChangedEvent:FireAllClients("LobbyPhase", Config.LobbyDuration)
         task.wait(Config.LobbyDuration)
@@ -1255,7 +1283,7 @@ task.spawn(function()
                         SavePlayerData(player)
 
                         raidSummaryEvent:FireClient(player, true, inv.TotalValue, #inv.Items, (cash and cash.Value) or 0)
-                        if player.Character then player.Character:PivotTo(CFrame.new(0, 123, 0)) end
+                        if player.Character then player.Character:PivotTo(GetHideoutSpawn(player)) end
                     end
                 end
             end
