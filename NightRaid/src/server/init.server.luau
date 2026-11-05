@@ -405,6 +405,8 @@ end
 -- ========================================================
 fireTaserEvent.OnServerEvent:Connect(function(player, targetPos)
     if currentPhaseValue.Value ~= "LootPhase" or not isFiniteVector3(targetPos) then return end
+    local inv = playerInventories[player]
+    if not inv or inv.Eliminated or inv.Escaped then return end
     if not canPerformAction(player, "FireTaser", 1.0) then return end
 
     local char = player.Character
@@ -438,6 +440,8 @@ end)
 
 throwSmokeEvent.OnServerEvent:Connect(function(player)
     if currentPhaseValue.Value ~= "LootPhase" then return end
+    local inv = playerInventories[player]
+    if not inv or inv.Eliminated or inv.Escaped then return end
     if not canPerformAction(player, "ThrowSmoke", 10.0) then return end
 
     local char = player.Character
@@ -515,7 +519,7 @@ local function SpawnLootItem(lootData, spawnPosition)
         local currentLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
         local upg = playerUpgrades[player] or { Pockets = 0 }
         local effectiveMaxWeight = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, upg.Pockets)
-        if not inv or inv.Escaped then return end
+        if not inv or inv.Escaped or inv.Eliminated then return end
 
         if not LootLogic.CanAddItem(inv.TotalWeight, lootData.Weight, effectiveMaxWeight) then
             inventoryUpdatedEvent:FireClient(player, inv, "Рюкзак переполнен!")
@@ -541,7 +545,7 @@ end
 
 dropItemEvent.OnServerEvent:Connect(function(player, itemIndex)
     local inv = playerInventories[player]
-    if not inv or inv.Escaped then return end
+    if not inv or inv.Escaped or inv.Eliminated then return end
 
     -- RemoteEvent arguments are controlled by the client: accept only a valid array index.
     if typeof(itemIndex) ~= "number"
@@ -771,7 +775,8 @@ local function InitPlayer(player)
 
     player.CharacterAdded:Connect(function(char)
         task.wait(0.2)
-        if currentPhaseValue.Value == "LobbyPhase" then
+        local inv = playerInventories[player]
+        if currentPhaseValue.Value == "LobbyPhase" or (inv and (inv.Eliminated or inv.Escaped)) then
             char:PivotTo(CFrame.new(0, 123, 0))
         else
             char:PivotTo(CFrame.new(0, 3, -65))
@@ -784,11 +789,15 @@ local function InitPlayer(player)
             local inv = playerInventories[player]
             local isRaidActive = currentPhaseValue.Value == "LootPhase"
                 or currentPhaseValue.Value == "ExtractionPhase"
-            if not inv or inv.Escaped or not isRaidActive or #inv.Items == 0 then
+            if not inv or inv.Escaped or inv.Eliminated or not isRaidActive then
                 return
             end
 
-            -- Copy the server-owned inventory before clearing it.
+            -- Death ends this player's participation in the current raid, even with an empty inventory.
+            inv.Eliminated = true
+            extractingPlayers[player] = nil
+
+            local lostValue = inv.TotalValue
             local droppedItems = LootLogic.GetDeathDropItems(inv.Items)
             local deathPosition = hrp.Position
             for index, item in ipairs(droppedItems) do
@@ -797,17 +806,14 @@ local function InitPlayer(player)
                 SpawnLootItem(item, deathPosition + offset)
             end
 
-            local lostValue = inv.TotalValue
             inv.Items = {}
             inv.TotalWeight = 0
             inv.TotalValue = 0
-            extractingPlayers[player] = nil
 
-            inventoryUpdatedEvent:FireClient(
-                player,
-                inv,
-                string.format("Вы погибли! Потеряна вся добыча на сумму $%d.", lostValue)
-            )
+            local message = lostValue > 0
+                and string.format("Вы погибли! Потеряна вся добыча на сумму $%d.", lostValue)
+                or "Вы погибли! Вы выбыли из текущего рейда."
+            inventoryUpdatedEvent:FireClient(player, inv, message)
         end)
 
         local fallY = 0
@@ -855,6 +861,8 @@ for _, p in Players:GetPlayers() do InitPlayer(p) end
 
 makeNoiseEvent.OnServerEvent:Connect(function(player)
     if currentPhaseValue.Value ~= "LootPhase" then return end
+    local inv = playerInventories[player]
+    if not inv or inv.Eliminated or inv.Escaped then return end
     if not canPerformAction(player, "MakeNoise", 0.75) then return end
 
     local char = player.Character
@@ -1012,8 +1020,9 @@ local function CreateGuardNPC(spawnPos)
                 local playerRoot = char and char:FindFirstChild("HumanoidRootPart")
                 local playerHumanoid = char and char:FindFirstChildOfClass("Humanoid")
 
+                local playerInv = playerInventories[player]
                 if playerRoot and playerHumanoid and playerHumanoid.Health > 0
-                    and not (playerInventories[player] and playerInventories[player].Escaped) then
+                    and not (playerInv and (playerInv.Escaped or playerInv.Eliminated)) then
                     local smokeBlocksVision = LootLogic.IsVisionBlockedBySmoke(
                         smokePositions, root.Position, playerRoot.Position, 14
                     )
@@ -1169,6 +1178,7 @@ local function ResetPlayersForRound()
         inv.TotalWeight = 0
         inv.Items = {}
         inv.Escaped = false
+        inv.Eliminated = false
         ApplyLoadoutToPlayer(player, playerActiveLoadouts[player] or Config.Loadouts[1])
         inventoryUpdatedEvent:FireClient(player, inv, "Новый рейд! Загляните к Скупщику в убежище.")
     end
@@ -1189,7 +1199,10 @@ task.spawn(function()
         -- Фаза Сбора Лута
         currentPhaseValue.Value = "LootPhase"
         for _, p in Players:GetPlayers() do
-            if p.Character then p.Character:PivotTo(CFrame.new(Vector3.new(math.random(-15, 15), 3, -65))) end
+            local inv = playerInventories[p]
+            if p.Character and not (inv and (inv.Escaped or inv.Eliminated)) then
+                p.Character:PivotTo(CFrame.new(Vector3.new(math.random(-15, 15), 3, -65)))
+            end
         end
 
         lootContainer:ClearAllChildren()
@@ -1239,7 +1252,7 @@ task.spawn(function()
 
             for player, _ in inZone do
                 local inv = playerInventories[player]
-                if inv and not inv.Escaped then
+                if inv and not inv.Escaped and not inv.Eliminated then
                     if not extractingPlayers[player] then extractingPlayers[player] = os.clock() end
                     local rem = math.max(0, 5 - (os.clock() - extractingPlayers[player]))
                     extractionProgressEvent:FireClient(player, rem, false)
