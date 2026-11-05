@@ -917,15 +917,19 @@ local function CreateGuardNPC(spawnPos)
     local currentWaypointIndex = 1
     local currentState = "Patrol"
     local investigateTarget = nil
+    local lastKnownPlayerPosition = nil
+    local searchStartedAt = nil
+    local searchMoveIssued = false
+    local SEARCH_DURATION = 7
 
     local function NavigateTo(dest)
         local path = PathfindingService:CreatePath({ AgentRadius = 2.5, AgentHeight = 5, AgentCanJump = false })
-        local s = pcall(function() path:ComputeAsync(root.Position, dest) end)
-        if s and path.Status == Enum.PathStatus.Success then
-            local pts = path:GetWaypoints()
-            for i = 2, math.min(#pts, 4) do
+        local success = pcall(function() path:ComputeAsync(root.Position, dest) end)
+        if success and path.Status == Enum.PathStatus.Success then
+            local points = path:GetWaypoints()
+            for i = 2, math.min(#points, 4) do
                 if not model.Parent or humanoid.Health <= 0 then break end
-                humanoid:MoveTo(pts[i].Position)
+                humanoid:MoveTo(points[i].Position)
                 task.wait(0.35)
             end
         else
@@ -947,10 +951,13 @@ local function CreateGuardNPC(spawnPos)
             end
 
             local inSmoke = false
+            local smokePositions = {}
             for _, smoke in smokesContainer:GetChildren() do
-                if (root.Position - smoke.Position).Magnitude <= 14 then
-                    inSmoke = true
-                    break
+                if smoke:IsA("BasePart") then
+                    table.insert(smokePositions, smoke.Position)
+                    if (root.Position - smoke.Position).Magnitude <= 14 then
+                        inSmoke = true
+                    end
                 end
             end
 
@@ -966,18 +973,23 @@ local function CreateGuardNPC(spawnPos)
             local targetChar = nil
             for _, player in Players:GetPlayers() do
                 local char = player.Character
-                local pHrp = char and char:FindFirstChild("HumanoidRootPart")
-                local pHum = char and char:FindFirstChildOfClass("Humanoid")
+                local playerRoot = char and char:FindFirstChild("HumanoidRootPart")
+                local playerHumanoid = char and char:FindFirstChildOfClass("Humanoid")
 
-                if pHrp and pHum and pHum.Health > 0 and not (playerInventories[player] and playerInventories[player].Escaped) then
-                    if LootLogic.IsPlayerDetected(root.Position, root.CFrame.LookVector, pHrp.Position, 55, 0.35, 12) then
+                if playerRoot and playerHumanoid and playerHumanoid.Health > 0
+                    and not (playerInventories[player] and playerInventories[player].Escaped) then
+                    local smokeBlocksVision = LootLogic.IsVisionBlockedBySmoke(
+                        smokePositions, root.Position, playerRoot.Position, 14
+                    )
+                    if not smokeBlocksVision
+                        and LootLogic.IsPlayerDetected(root.Position, root.CFrame.LookVector, playerRoot.Position, 55, 0.35, 12) then
                         local rayParams = RaycastParams.new()
                         rayParams.FilterDescendantsInstances = { model, char, smokesContainer }
                         rayParams.FilterType = Enum.RaycastFilterType.Exclude
-
-                        local hit = workspace:Raycast(root.Position, pHrp.Position - root.Position, rayParams)
+                        local hit = workspace:Raycast(root.Position, playerRoot.Position - root.Position, rayParams)
                         if not hit then
                             targetChar = char
+                            lastKnownPlayerPosition = playerRoot.Position
                             break
                         end
                     end
@@ -986,26 +998,61 @@ local function CreateGuardNPC(spawnPos)
 
             if targetChar then
                 currentState = "Chase"
+                searchStartedAt = nil
+                searchMoveIssued = false
                 statusLabel.Text = "[ТРЕВОГА: ПОГОНЯ]"
                 statusLabel.TextColor3 = Color3.fromRGB(255, 30, 30)
                 light.Color = Color3.fromRGB(255, 0, 0)
                 humanoid.WalkSpeed = 20.5
                 humanoid:MoveTo(targetChar.HumanoidRootPart.Position)
-
-                if (targetChar.HumanoidRootPart.Position - root.Position).Magnitude <= 5.0 then
-                    local tHum = targetChar:FindFirstChildOfClass("Humanoid")
-                    if tHum then tHum:TakeDamage(25) task.wait(0.5) end
-                end
-            else
-                if currentSuspiciousNoise and (os.clock() - currentSuspiciousNoise.Timestamp) < 6.0 then
-                    if LootLogic.IsNoiseAudible(root.Position, currentSuspiciousNoise.Position, currentSuspiciousNoise.Radius) then
-                        currentState = "Investigate"
-                        investigateTarget = currentSuspiciousNoise.Position
-                        currentSuspiciousNoise = nil
+                if (targetChar.HumanoidRootPart.Position - root.Position).Magnitude <= 5 then
+                    local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
+                    if targetHumanoid then
+                        targetHumanoid:TakeDamage(25)
+                        task.wait(0.5)
                     end
                 end
+            else
+                if currentState == "Chase" and lastKnownPlayerPosition then
+                    currentState = "Search"
+                    searchStartedAt = os.clock()
+                    searchMoveIssued = false
+                end
 
-                if currentState == "Investigate" and investigateTarget then
+                if currentState ~= "Search" and currentSuspiciousNoise
+                    and (os.clock() - currentSuspiciousNoise.Timestamp) < 6
+                    and LootLogic.IsNoiseAudible(root.Position, currentSuspiciousNoise.Position, currentSuspiciousNoise.Radius) then
+                    currentState = "Investigate"
+                    investigateTarget = currentSuspiciousNoise.Position
+                    currentSuspiciousNoise = nil
+                end
+
+                if currentState == "Search" and lastKnownPlayerPosition then
+                    statusLabel.Text = "[ПОИСК ИГРОКА]"
+                    statusLabel.TextColor3 = Color3.fromRGB(255, 220, 30)
+                    light.Color = Color3.fromRGB(255, 200, 20)
+                    humanoid.WalkSpeed = 16
+                    if not searchMoveIssued then
+                        searchMoveIssued = true
+                        NavigateTo(lastKnownPlayerPosition)
+                    end
+                    local searchElapsed = os.clock() - searchStartedAt
+                    if (root.Position - lastKnownPlayerPosition).Magnitude <= 8 then
+                        if searchElapsed < SEARCH_DURATION then
+                            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, searchElapsed * math.rad(100), 0)
+                        else
+                            currentState = "Patrol"
+                            lastKnownPlayerPosition = nil
+                            searchStartedAt = nil
+                            searchMoveIssued = false
+                        end
+                    elseif searchElapsed >= SEARCH_DURATION then
+                        currentState = "Patrol"
+                        lastKnownPlayerPosition = nil
+                        searchStartedAt = nil
+                        searchMoveIssued = false
+                    end
+                elseif currentState == "Investigate" and investigateTarget then
                     statusLabel.Text = "[ПОИСК ШУМА]"
                     statusLabel.TextColor3 = Color3.fromRGB(255, 230, 0)
                     light.Color = Color3.fromRGB(255, 220, 30)
