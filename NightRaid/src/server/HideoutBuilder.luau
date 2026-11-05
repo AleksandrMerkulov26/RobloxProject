@@ -46,8 +46,8 @@ local function addLight(parent, name, color, brightness, range, position)
     return fixture
 end
 
-local function addLabel(parent, title, accent)
-    local board = createPart(parent, "StationSign", Vector3.new(10, 2.2, 0.35), parent.Position + Vector3.new(0, 5.2, -7), COLORS.dark, Enum.Material.Metal)
+local function addLabel(parent, title, accent, center)
+    local board = createPart(parent, "StationSign", Vector3.new(10, 2.2, 0.35), center + Vector3.new(0, 5.2, -7), COLORS.dark, Enum.Material.Metal)
     local gui = Instance.new("SurfaceGui")
     gui.Face = Enum.NormalId.Front
     gui.CanvasSize = Vector2.new(600, 140)
@@ -76,7 +76,7 @@ local function addZone(parent, name, title, center, accent, stationType)
 
     local console = createPart(zone, "MainStation", Vector3.new(8, 3.2, 2), center + Vector3.new(0, 2.25, -5), COLORS.metal, Enum.Material.Metal)
     createPart(zone, "ConsoleScreen", Vector3.new(6.8, 1.8, 0.15), console.Position + Vector3.new(0, 0.45, -1.08), accent, Enum.Material.Neon, {canCollide = false})
-    addLabel(zone, title, accent)
+    addLabel(zone, title, accent, center)
 
     if stationType == "Armory" then
         for i = -1, 1 do
