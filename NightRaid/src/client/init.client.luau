@@ -842,7 +842,10 @@ local function CreateMainUI()
         commandModal.Visible = false
         local character = player.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid then workspace.CurrentCamera.CameraSubject = humanoid end
+        if humanoid then
+            local camera = workspace.CurrentCamera
+            camera.CameraSubject = humanoid
+        end
     end)
 
     local commandRefresh = Instance.new("TextButton")
@@ -931,7 +934,8 @@ local function CreateMainUI()
                     local targetCharacter = target and target.Character
                     local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
                     if targetHumanoid and targetHumanoid.Health > 0 then
-                        workspace.CurrentCamera.CameraSubject = targetHumanoid
+                        local camera = workspace.CurrentCamera
+                        camera.CameraSubject = targetHumanoid
                         commandStatus.Text = "Наблюдение: " .. entry.DisplayName
                     else
                         commandStatus.Text = "Игрок больше недоступен для наблюдения"
