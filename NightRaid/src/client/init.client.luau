@@ -783,7 +783,7 @@ local function CreateMainUI()
 
     -- Station prompts open the existing interfaces instead of duplicating their logic.
     openHideoutStationEvent.OnClientEvent:Connect(function(stationName)
-        if currentPhaseValue.Value ~= "LobbyPhase" then return end
+        print("[HideoutStation][CLIENT] Received:", stationName, "Phase:", currentPhaseValue.Value)
 
         if stationName == "Armory" then
             marketModal.Visible = false
