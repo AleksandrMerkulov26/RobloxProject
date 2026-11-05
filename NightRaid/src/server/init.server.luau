@@ -44,7 +44,7 @@ local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
-local HideoutBuilder = require(script.Parent:WaitForChild("HideoutBuilder"))
+local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
 
 -- Настройки освещения склада
 Lighting.ClockTime = 0
