@@ -36,6 +36,7 @@ local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade")
 local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
 local openHideoutStationEvent = networkFolder:WaitForChild("OpenHideoutStation")
 local getRaidStatusFunction = networkFolder:WaitForChild("GetRaidStatus")
+local startRaidEvent = networkFolder:WaitForChild("StartRaid")
 
 local currentInventoryData = { TotalValue = 0, TotalWeight = 0, Items = {} }
 local currentLoadout = Config.Loadouts[1]
@@ -1013,10 +1014,36 @@ local function CreateTimerUI()
     phaseLabel.Font = Enum.Font.GothamBold
     phaseLabel.BackgroundTransparency = 1
 
+    local startRaidButton = Instance.new("TextButton")
+    startRaidButton.Parent = timerGui
+    startRaidButton.Size = UDim2.new(0, 220, 0, 42)
+    startRaidButton.Position = UDim2.new(0.5, -110, 0, 68)
+    startRaidButton.BackgroundColor3 = Color3.fromRGB(35, 135, 85)
+    startRaidButton.TextColor3 = Color3.new(1, 1, 1)
+    startRaidButton.Text = "НАЧАТЬ РЕЙД"
+    startRaidButton.Font = Enum.Font.GothamBold
+    startRaidButton.TextSize = 15
+    startRaidButton.Visible = currentPhaseValue.Value == "LobbyPhase"
+    Instance.new("UICorner", startRaidButton).CornerRadius = UDim.new(0, 8)
+
+    startRaidButton.MouseButton1Click:Connect(function()
+        if currentPhaseValue.Value ~= "LobbyPhase" then return end
+        startRaidButton.Active = false
+        startRaidButton.Text = "ЗАПУСК..."
+        startRaidEvent:FireServer()
+    end)
+
     -- A newer phase invalidates the timer task from the previous phase.
     local timerGeneration = 0
 
     stateChangedEvent.OnClientEvent:Connect(function(phase, dur)
+        startRaidButton.Visible = phase == "LobbyPhase"
+        startRaidButton.Active = phase == "LobbyPhase"
+        startRaidButton.Text = "НАЧАТЬ РЕЙД"
+        if phase == "LobbyPhase" then
+            phaseLabel.Text = "Убежище — ожидание запуска"
+            phaseLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+        end
         timerGeneration += 1
         local currentGeneration = timerGeneration
         local finish = os.clock() + dur
