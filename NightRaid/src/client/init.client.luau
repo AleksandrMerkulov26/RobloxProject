@@ -34,6 +34,7 @@ local throwSmokeEvent = networkFolder:WaitForChild("ThrowSmoke")
 local fireTaserEvent = networkFolder:WaitForChild("FireTaser")
 local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade")
 local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
+local openHideoutStationEvent = networkFolder:WaitForChild("OpenHideoutStation")
 
 local currentInventoryData = { TotalValue = 0, TotalWeight = 0, Items = {} }
 local currentLoadout = Config.Loadouts[1]
@@ -778,6 +779,21 @@ local function CreateMainUI()
 
         if openUI then marketModal.Visible = true end
         if marketModal.Visible then RefreshMarketUI() end
+    end)
+
+    -- Station prompts open the existing interfaces instead of duplicating their logic.
+    openHideoutStationEvent.OnClientEvent:Connect(function(stationName)
+        if currentPhaseValue.Value ~= "LobbyPhase" then return end
+
+        if stationName == "Armory" then
+            marketModal.Visible = false
+            loadoutModal.Visible = true
+            RefreshLoadoutsUI()
+        elseif stationName == "Workshop" then
+            loadoutModal.Visible = false
+            marketModal.Visible = true
+            RefreshMarketUI()
+        end
     end)
 
     loadoutAppliedEvent.OnClientEvent:Connect(function(appliedLoadout, appliedUpgrades)
