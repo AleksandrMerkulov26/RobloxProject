@@ -782,6 +782,10 @@ local function CreateMainUI()
         if marketModal.Visible then RefreshMarketUI() end
     end)
 
+    -- Forward declarations let the station callback access the command room UI below.
+    local commandModal
+    local RefreshCommandRoom
+
     -- Station prompts open the existing interfaces instead of duplicating their logic.
     openHideoutStationEvent.OnClientEvent:Connect(function(stationName)
         print("[HideoutStation][CLIENT] Received:", stationName, "Phase:", currentPhaseValue.Value)
@@ -801,7 +805,7 @@ local function CreateMainUI()
     end)
 
     -- Command room: live raid roster and local spectator camera controls.
-    local commandModal = Instance.new("Frame")
+    commandModal = Instance.new("Frame")
     commandModal.Name = "CommandRoomModal"
     commandModal.Parent = hud
     commandModal.Size = UDim2.new(0, 480, 0, 340)
@@ -874,7 +878,7 @@ local function CreateMainUI()
     commandLayout.Padding = UDim.new(0, 6)
     commandLayout.Parent = commandList
 
-    local function RefreshCommandRoom()
+    RefreshCommandRoom = function()
         for _, child in commandList:GetChildren() do
             if child:IsA("Frame") then child:Destroy() end
         end
