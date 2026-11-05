@@ -41,6 +41,7 @@ local throwSmokeEvent = getOrCreateRemote("ThrowSmoke", "RemoteEvent")
 local fireTaserEvent = getOrCreateRemote("FireTaser", "RemoteEvent")
 local buyUpgradeEvent = getOrCreateRemote("BuyUpgrade", "RemoteEvent")
 local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
+local openHideoutStationEvent = getOrCreateRemote("OpenHideoutStation", "RemoteEvent")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
