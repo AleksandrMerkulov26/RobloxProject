@@ -35,6 +35,8 @@ local fireTaserEvent = networkFolder:WaitForChild("FireTaser")
 local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade")
 local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
 local openHideoutStationEvent = networkFolder:WaitForChild("OpenHideoutStation")
+local getRaidStatusFunction = networkFolder:WaitForChild("GetRaidStatus")
+local startRaidEvent = networkFolder:WaitForChild("StartRaid")
 
 local currentInventoryData = { TotalValue = 0, TotalWeight = 0, Items = {} }
 local currentLoadout = Config.Loadouts[1]
@@ -781,6 +783,10 @@ local function CreateMainUI()
         if marketModal.Visible then RefreshMarketUI() end
     end)
 
+    -- Forward declarations let the station callback access the command room UI below.
+    local commandModal
+    local RefreshCommandRoom
+
     -- Station prompts open the existing interfaces instead of duplicating their logic.
     openHideoutStationEvent.OnClientEvent:Connect(function(stationName)
         print("[HideoutStation][CLIENT] Received:", stationName, "Phase:", currentPhaseValue.Value)
@@ -793,8 +799,156 @@ local function CreateMainUI()
             loadoutModal.Visible = false
             marketModal.Visible = true
             RefreshMarketUI()
+        elseif stationName == "Command" then
+            commandModal.Visible = true
+            RefreshCommandRoom()
         end
     end)
+
+    -- Command room: live raid roster and local spectator camera controls.
+    commandModal = Instance.new("Frame")
+    commandModal.Name = "CommandRoomModal"
+    commandModal.Parent = hud
+    commandModal.Size = UDim2.new(0, 480, 0, 340)
+    commandModal.AnchorPoint = Vector2.new(0.5, 0.5)
+    commandModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    commandModal.BackgroundColor3 = Color3.fromRGB(15, 23, 29)
+    commandModal.Visible = false
+    commandModal.ZIndex = 70
+    Instance.new("UICorner", commandModal).CornerRadius = UDim.new(0, 10)
+
+    local commandTitle = Instance.new("TextLabel")
+    commandTitle.Parent = commandModal
+    commandTitle.Size = UDim2.new(1, -110, 0, 42)
+    commandTitle.Position = UDim2.new(0, 16, 0, 8)
+    commandTitle.BackgroundTransparency = 1
+    commandTitle.Text = "ЦЕНТР УПРАВЛЕНИЯ РЕЙДОМ"
+    commandTitle.TextColor3 = Color3.fromRGB(100, 220, 160)
+    commandTitle.Font = Enum.Font.GothamBold
+    commandTitle.TextSize = 16
+    commandTitle.TextXAlignment = Enum.TextXAlignment.Left
+    commandTitle.ZIndex = 71
+
+    local commandClose = Instance.new("TextButton")
+    commandClose.Parent = commandModal
+    commandClose.Size = UDim2.new(0, 34, 0, 30)
+    commandClose.Position = UDim2.new(1, -46, 0, 10)
+    commandClose.Text = "X"
+    commandClose.TextColor3 = Color3.new(1, 1, 1)
+    commandClose.BackgroundColor3 = Color3.fromRGB(135, 45, 45)
+    commandClose.Font = Enum.Font.GothamBold
+    commandClose.ZIndex = 72
+    commandClose.MouseButton1Click:Connect(function()
+        commandModal.Visible = false
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            local camera = workspace.CurrentCamera
+            camera.CameraSubject = humanoid
+        end
+    end)
+
+    local commandRefresh = Instance.new("TextButton")
+    commandRefresh.Parent = commandModal
+    commandRefresh.Size = UDim2.new(0, 110, 0, 30)
+    commandRefresh.Position = UDim2.new(1, -164, 0, 10)
+    commandRefresh.Text = "Обновить"
+    commandRefresh.TextColor3 = Color3.new(1, 1, 1)
+    commandRefresh.BackgroundColor3 = Color3.fromRGB(45, 90, 115)
+    commandRefresh.Font = Enum.Font.GothamBold
+    commandRefresh.ZIndex = 72
+
+    local commandStatus = Instance.new("TextLabel")
+    commandStatus.Parent = commandModal
+    commandStatus.Size = UDim2.new(1, -32, 0, 24)
+    commandStatus.Position = UDim2.new(0, 16, 0, 48)
+    commandStatus.BackgroundTransparency = 1
+    commandStatus.Text = "Состояние игроков"
+    commandStatus.TextColor3 = Color3.fromRGB(180, 195, 205)
+    commandStatus.Font = Enum.Font.Gotham
+    commandStatus.TextSize = 12
+    commandStatus.TextXAlignment = Enum.TextXAlignment.Left
+    commandStatus.ZIndex = 71
+
+    local commandList = Instance.new("ScrollingFrame")
+    commandList.Parent = commandModal
+    commandList.Size = UDim2.new(1, -32, 1, -88)
+    commandList.Position = UDim2.new(0, 16, 0, 78)
+    commandList.BackgroundTransparency = 1
+    commandList.BorderSizePixel = 0
+    commandList.ScrollBarThickness = 5
+    commandList.ZIndex = 71
+    local commandLayout = Instance.new("UIListLayout")
+    commandLayout.Padding = UDim.new(0, 6)
+    commandLayout.Parent = commandList
+
+    RefreshCommandRoom = function()
+        for _, child in commandList:GetChildren() do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+
+        local success, roster = pcall(function()
+            return getRaidStatusFunction:InvokeServer()
+        end)
+        if not success or type(roster) ~= "table" then
+            commandStatus.Text = "Не удалось получить состояние рейда"
+            return
+        end
+
+        local activeCount = 0
+        for index, entry in ipairs(roster) do
+            if entry.CanSpectate then activeCount += 1 end
+            local row = Instance.new("Frame")
+            row.Parent = commandList
+            row.Size = UDim2.new(1, -8, 0, 48)
+            row.BackgroundColor3 = Color3.fromRGB(27, 37, 44)
+            row.LayoutOrder = index
+            row.ZIndex = 72
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Parent = row
+            nameLabel.Size = UDim2.new(0.62, 0, 1, 0)
+            nameLabel.Position = UDim2.new(0, 12, 0, 0)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.Text = entry.DisplayName .. "  —  " .. entry.Status
+            nameLabel.TextColor3 = Color3.fromRGB(230, 235, 240)
+            nameLabel.Font = Enum.Font.GothamMedium
+            nameLabel.TextSize = 12
+            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+            nameLabel.ZIndex = 73
+
+            if entry.CanSpectate then
+                local watchButton = Instance.new("TextButton")
+                watchButton.Parent = row
+                watchButton.Size = UDim2.new(0, 112, 0, 30)
+                watchButton.Position = UDim2.new(1, -122, 0.5, -15)
+                watchButton.Text = "НАБЛЮДАТЬ"
+                watchButton.TextColor3 = Color3.new(1, 1, 1)
+                watchButton.BackgroundColor3 = Color3.fromRGB(40, 115, 85)
+                watchButton.Font = Enum.Font.GothamBold
+                watchButton.TextSize = 11
+                watchButton.ZIndex = 73
+                watchButton.MouseButton1Click:Connect(function()
+                    local target = Players:GetPlayerByUserId(entry.UserId)
+                    local targetCharacter = target and target.Character
+                    local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
+                    if targetHumanoid and targetHumanoid.Health > 0 then
+                        local camera = workspace.CurrentCamera
+                        camera.CameraSubject = targetHumanoid
+                        commandStatus.Text = "Наблюдение: " .. entry.DisplayName
+                    else
+                        commandStatus.Text = "Игрок больше недоступен для наблюдения"
+                    end
+                end)
+            end
+        end
+
+        commandStatus.Text = string.format("Игроков в рейде: %d · Обновляй список вручную", activeCount)
+        commandList.CanvasSize = UDim2.new(0, 0, 0, #roster * 54)
+    end
+
+    commandRefresh.MouseButton1Click:Connect(RefreshCommandRoom)
 
     loadoutAppliedEvent.OnClientEvent:Connect(function(appliedLoadout, appliedUpgrades)
         currentLoadout = appliedLoadout
@@ -864,10 +1018,44 @@ local function CreateTimerUI()
     phaseLabel.Font = Enum.Font.GothamBold
     phaseLabel.BackgroundTransparency = 1
 
+    local startRaidButton = Instance.new("TextButton")
+    startRaidButton.Parent = timerGui
+    startRaidButton.Size = UDim2.new(0, 220, 0, 42)
+    startRaidButton.Position = UDim2.new(0.5, -110, 0, 68)
+    startRaidButton.BackgroundColor3 = Color3.fromRGB(35, 135, 85)
+    startRaidButton.TextColor3 = Color3.new(1, 1, 1)
+    startRaidButton.Text = "НАЧАТЬ РЕЙД"
+    startRaidButton.Font = Enum.Font.GothamBold
+    startRaidButton.TextSize = 15
+    startRaidButton.Visible = currentPhaseValue.Value == "LobbyPhase"
+    Instance.new("UICorner", startRaidButton).CornerRadius = UDim.new(0, 8)
+
+    startRaidButton.MouseButton1Click:Connect(function()
+        if currentPhaseValue.Value ~= "LobbyPhase" then return end
+        startRaidButton.Active = false
+        startRaidButton.Text = "ЗАПРОС..."
+        startRaidEvent:FireServer()
+        -- If the server rejects the request (for example, outside the hideout),
+        -- allow the player to try again after moving to the correct location.
+        task.delay(1.5, function()
+            if currentPhaseValue.Value == "LobbyPhase" then
+                startRaidButton.Active = true
+                startRaidButton.Text = "НАЧАТЬ РЕЙД"
+            end
+        end)
+    end)
+
     -- A newer phase invalidates the timer task from the previous phase.
     local timerGeneration = 0
 
     stateChangedEvent.OnClientEvent:Connect(function(phase, dur)
+        startRaidButton.Visible = phase == "LobbyPhase"
+        startRaidButton.Active = phase == "LobbyPhase"
+        startRaidButton.Text = "НАЧАТЬ РЕЙД"
+        if phase == "LobbyPhase" then
+            phaseLabel.Text = "Убежище — ожидание запуска"
+            phaseLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+        end
         timerGeneration += 1
         local currentGeneration = timerGeneration
         local finish = os.clock() + dur

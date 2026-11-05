@@ -42,6 +42,8 @@ local fireTaserEvent = getOrCreateRemote("FireTaser", "RemoteEvent")
 local buyUpgradeEvent = getOrCreateRemote("BuyUpgrade", "RemoteEvent")
 local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
 local openHideoutStationEvent = getOrCreateRemote("OpenHideoutStation", "RemoteEvent")
+local getRaidStatusFunction = getOrCreateRemote("GetRaidStatus", "RemoteFunction")
+local startRaidEvent = getOrCreateRemote("StartRaid", "RemoteEvent")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
@@ -875,6 +877,58 @@ local function InitPlayer(player)
     end)
 end
 
+getRaidStatusFunction.OnServerInvoke = function(requestingPlayer)
+    local hideout = playerHideouts[requestingPlayer]
+    local character = requestingPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local commandZone = hideout and hideout.Model and hideout.Model:FindFirstChild("Command")
+    local commandConsole = commandZone and commandZone:FindFirstChild("MainStation")
+
+    -- Require the caller to be physically at their own command console.
+    if not hideout or not hideout.Model or not hideout.Model.Parent
+        or not root or not commandConsole
+        or (root.Position - commandConsole.Position).Magnitude > 18 then
+        return {}
+    end
+
+    local result = {}
+    local phase = currentPhaseValue.Value
+    for _, targetPlayer in Players:GetPlayers() do
+        if targetPlayer ~= requestingPlayer then
+            local inventory = playerInventories[targetPlayer]
+            local character = targetPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local isAlive = humanoid ~= nil and humanoid.Health > 0
+            local escaped = inventory ~= nil and inventory.Escaped == true
+            local status = "Ожидает начала рейда"
+            local canSpectate = false
+
+            if escaped then
+                status = "Эвакуировался"
+            elseif phase == "LootPhase" or phase == "ExtractionPhase" then
+                if isAlive then
+                    status = "В рейде"
+                    canSpectate = true
+                else
+                    status = "Выбыл"
+                end
+            end
+
+            table.insert(result, {
+                UserId = targetPlayer.UserId,
+                DisplayName = targetPlayer.DisplayName,
+                Status = status,
+                CanSpectate = canSpectate,
+            })
+        end
+    end
+
+    table.sort(result, function(a, b)
+        return a.DisplayName < b.DisplayName
+    end)
+    return result
+end
+
 Players.PlayerAdded:Connect(InitPlayer)
 Players.PlayerRemoving:Connect(function(player)
     SavePlayerData(player)
@@ -1206,6 +1260,27 @@ local function CreateExtractionZone()
     return zone
 end
 
+local raidStartRequested = false
+
+startRaidEvent.OnServerEvent:Connect(function(player)
+    if currentPhaseValue.Value ~= "LobbyPhase" or raidStartRequested then return end
+
+    local hideout = playerHideouts[player]
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not hideout or not root or not humanoid or humanoid.Health <= 0 then return end
+
+    -- The start button is valid only while the player is close to their own hideout spawn.
+    if (root.Position - hideout.SpawnCFrame.Position).Magnitude > 45 then
+        warn("[Raid] Start rejected: player is not inside their hideout")
+        return
+    end
+
+    raidStartRequested = true
+    print("[Raid] Start requested by", player.Name)
+end)
+
 local function ResetPlayersForRound()
     for player, inv in playerInventories do
         inv.TotalValue = 0
@@ -1221,13 +1296,16 @@ task.spawn(function()
     while true do
         ResetPlayersForRound()
 
-        -- Фаза Лобби
+        -- Лобби: игроки готовятся в убежищах и запускают рейд кнопкой.
         currentPhaseValue.Value = "LobbyPhase"
+        raidStartRequested = false
         for _, p in Players:GetPlayers() do
             if p.Character then p.Character:PivotTo(GetHideoutSpawn(p) * CFrame.new(math.random(-6, 6), 0, math.random(-6, 6))) end
         end
-        stateChangedEvent:FireAllClients("LobbyPhase", Config.LobbyDuration)
-        task.wait(Config.LobbyDuration)
+        stateChangedEvent:FireAllClients("LobbyPhase", 0)
+        while not raidStartRequested do
+            task.wait(0.2)
+        end
 
         -- Фаза Сбора Лута
         currentPhaseValue.Value = "LootPhase"
