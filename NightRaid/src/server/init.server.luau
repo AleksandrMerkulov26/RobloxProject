@@ -43,6 +43,7 @@ local buyUpgradeEvent = getOrCreateRemote("BuyUpgrade", "RemoteEvent")
 local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
 local openHideoutStationEvent = getOrCreateRemote("OpenHideoutStation", "RemoteEvent")
 local getRaidStatusFunction = getOrCreateRemote("GetRaidStatus", "RemoteFunction")
+local startRaidEvent = getOrCreateRemote("StartRaid", "RemoteEvent")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
@@ -1259,6 +1260,27 @@ local function CreateExtractionZone()
     return zone
 end
 
+local raidStartRequested = false
+
+startRaidEvent.OnServerEvent:Connect(function(player)
+    if currentPhaseValue.Value ~= "LobbyPhase" or raidStartRequested then return end
+
+    local hideout = playerHideouts[player]
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not hideout or not root or not humanoid or humanoid.Health <= 0 then return end
+
+    -- The start button is valid only while the player is close to their own hideout spawn.
+    if (root.Position - hideout.SpawnCFrame.Position).Magnitude > 45 then
+        warn("[Raid] Start rejected: player is not inside their hideout")
+        return
+    end
+
+    raidStartRequested = true
+    print("[Raid] Start requested by", player.Name)
+end)
+
 local function ResetPlayersForRound()
     for player, inv in playerInventories do
         inv.TotalValue = 0
@@ -1274,13 +1296,16 @@ task.spawn(function()
     while true do
         ResetPlayersForRound()
 
-        -- Фаза Лобби
+        -- Лобби: игроки готовятся в убежищах и запускают рейд кнопкой.
         currentPhaseValue.Value = "LobbyPhase"
+        raidStartRequested = false
         for _, p in Players:GetPlayers() do
             if p.Character then p.Character:PivotTo(GetHideoutSpawn(p) * CFrame.new(math.random(-6, 6), 0, math.random(-6, 6))) end
         end
-        stateChangedEvent:FireAllClients("LobbyPhase", Config.LobbyDuration)
-        task.wait(Config.LobbyDuration)
+        stateChangedEvent:FireAllClients("LobbyPhase", 0)
+        while not raidStartRequested do
+            task.wait(0.2)
+        end
 
         -- Фаза Сбора Лута
         currentPhaseValue.Value = "LootPhase"
