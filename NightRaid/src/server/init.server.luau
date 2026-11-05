@@ -790,8 +790,16 @@ local function InitPlayer(player)
 
     for stationName, stationPrompt in stationPrompts do
         stationPrompt.Triggered:Connect(function(triggeringPlayer)
-            if triggeringPlayer ~= player then return end
-            if currentPhaseValue.Value ~= "LobbyPhase" then return end
+            print("[HideoutStation][SERVER] Triggered:", stationName, "By:", triggeringPlayer.Name, "Owner:", player.Name, "Phase:", currentPhaseValue.Value)
+            if triggeringPlayer ~= player then
+                warn("[HideoutStation][SERVER] Rejected: not the hideout owner")
+                return
+            end
+            if currentPhaseValue.Value ~= "LobbyPhase" then
+                warn("[HideoutStation][SERVER] Rejected: phase is not LobbyPhase")
+                return
+            end
+            print("[HideoutStation][SERVER] Sending OpenHideoutStation:", stationName)
             openHideoutStationEvent:FireClient(player, stationName)
         end)
     end
