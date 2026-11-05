@@ -112,6 +112,17 @@ local function RunSuite()
     local noiseFaraway = Vector3.new(50, 3, 0) -- Дистанция 50 studs
     AssertTest("Шум за пределами радиуса (50 > 40) -> Не услышан", LootLogic.IsNoiseAudible(guardPos, noiseFaraway, 40), false)
 
+    -- Повышенная готовность временно усиливает зрение и скорость охранника.
+    local normalAwareness = LootLogic.GetGuardAwareness(false)
+    AssertTest("Обычная дальность зрения охранника", normalAwareness.ViewDistance, 55)
+    AssertTest("Обычная скорость патруля", normalAwareness.PatrolSpeed, 13.5)
+
+    local alertedAwareness = LootLogic.GetGuardAwareness(true)
+    AssertTest("Дальность зрения при тревоге", alertedAwareness.ViewDistance, 70)
+    AssertTest("Более широкий обзор при тревоге", alertedAwareness.FovDotThreshold, 0.2)
+    AssertTest("Увеличенная скорость патруля при тревоге", alertedAwareness.PatrolSpeed, 16)
+    AssertTest("Увеличенная скорость поиска при тревоге", alertedAwareness.SearchSpeed, 18)
+
     -- ----------------------------------------------------
     -- БЛОК 7: ДЫМОВАЯ ЗАВЕСА И ТАЙЗЕР
     -- ----------------------------------------------------
