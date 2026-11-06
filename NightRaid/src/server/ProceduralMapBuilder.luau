@@ -5,8 +5,8 @@ local function rotate(position: Vector3, turns: number): Vector3
     return position
 end
 
-function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player) -> ())?)
-    local random = Random.new(seed or os.time())
+function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player, Vector3) -> ())?)
+    local random = Random.new(seed or math.floor(os.clock() * 1000000))
     local rotation = random:NextInteger(0, 3)
     local old = workspace:FindFirstChild("HeistFacility")
     if old then old:Destroy() end
