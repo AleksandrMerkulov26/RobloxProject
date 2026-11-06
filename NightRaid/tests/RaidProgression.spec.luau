@@ -30,6 +30,20 @@ local function expect(name, actual, expected)
     print(string.format("[PASS] %s", name))
 end
 
+local function expectNear(name, actual, expected, tolerance)
+    total += 1
+    if math.abs(actual - expected) > tolerance then
+        table.insert(failures, string.format(
+            "[FAIL] %s: expected approximately %s, got %s",
+            name,
+            tostring(expected),
+            tostring(actual)
+        ))
+        return
+    end
+    print(string.format("[PASS] %s", name))
+end
+
 -- Raid progression and safe persisted-stat normalization.
 local normalized = RaidProgression.NormalizeStats(12.9, 7)
 expect("stats floor raid count", normalized.Raids, 12)
@@ -103,7 +117,7 @@ local blackout = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.1))
 expect("Blackout reduces guard view distance", blackout.ViewDistance, 38.5)
 local redAlert = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.4))
 expect("Red Alert increases guard view distance", redAlert.ViewDistance, 66)
-expect("Red Alert increases patrol speed", redAlert.PatrolSpeed, 14.85)
+expectNear("Red Alert increases patrol speed", redAlert.PatrolSpeed, 14.85, 0.000001)
 
 local loot = { Name = "Test loot", Value = 100, Weight = 2, Fragile = false }
 local scaledLoot = NightEvents.ScaleLootValue(loot, 1.5)
