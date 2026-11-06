@@ -55,6 +55,7 @@ local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild(
 local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
 local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
 local RaidProgression = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RaidProgression"))
+local MapBuilder = require(script:WaitForChild("ProceduralMapBuilder"))
 
 -- Настройки освещения склада
 Lighting.ClockTime = 0
@@ -176,148 +177,29 @@ end
 
 local function isFiniteVector3(value)
     return typeof(value) == "Vector3"
-        and value.X == value.X and math.abs(value.X) < 100000
-        and value.Y == value.Y and math.abs(value.Y) < 100000
-        and value.Z == value.Z and math.abs(value.Z) < 100000
+        and value.X == value.X and math.abs(value.X) < 100000        and value.Y == value.Y and math.abs(value.Y) < 100000        and value.Z == value.Z and math.abs(value.Z) < 100000
 end
 
 -- ========================================================
 -- 4. ГЕНЕРАТОР КАРТЫ С УТОЛЩЕННЫМ ПОЛОМ И СКУПЩИКОМ
 -- ========================================================
 local function BuildFacility()
-    local oldFacility = workspace:FindFirstChild("HeistFacility")
-    if oldFacility then oldFacility:Destroy() end
-
-    local facility = Instance.new("Folder")
-    facility.Name = "HeistFacility"
-    facility.Parent = workspace
-
-    local lootSpawnPoints = {}
-
-    local function createWall(name, size, pos, color, material)
-        local part = Instance.new("Part")
-        part.Name = name
-        part.Size = size
-        part.Position = pos
-        part.Anchored = true
-        part.Material = material or Enum.Material.Concrete
-        part.Color = color or Color3.fromRGB(45, 48, 55)
-        part.CastShadow = false
-        part.Parent = facility
-        return part
-    end
-
-    -- Утолщенный пол ангара (толщина 10 studs)
-    for x = -60, 60, 40 do
-        for z = -60, 60, 40 do
-            createWall("FloorTile", Vector3.new(40, 10, 40), Vector3.new(x, -5, z), Color3.fromRGB(30, 32, 36))
-        end
-    end
-
-    createWall("WallNorth", Vector3.new(160, 32, 4), Vector3.new(0, 16, -80))
-    createWall("WallSouth", Vector3.new(160, 32, 4), Vector3.new(0, 16, 80))
-    createWall("WallWest", Vector3.new(4, 32, 160), Vector3.new(-80, 16, 0))
-    createWall("WallEast", Vector3.new(4, 32, 160), Vector3.new(80, 16, 0))
-
-    for x = -60, 60, 40 do
-        for z = -60, 60, 40 do
-            createWall("RoofTile", Vector3.new(40, 2, 40), Vector3.new(x, 32, z), Color3.fromRGB(20, 22, 25))
-        end
-    end
-
-    local columnCoords = {
-        Vector3.new(-40, 15, -40), Vector3.new(40, 15, -40),
-        Vector3.new(-40, 15, 40), Vector3.new(40, 15, 40)
-    }
-    for _, cPos in columnCoords do
-        createWall("Pillar", Vector3.new(4, 30, 4), Vector3.new(cPos.X, 15, cPos.Z), Color3.fromRGB(60, 65, 75), Enum.Material.Metal)
-    end
-
-    createWall("BeamNorth", Vector3.new(80, 2, 4), Vector3.new(0, 24, -40), Color3.fromRGB(80, 85, 95), Enum.Material.Metal)
-    createWall("BeamSouth", Vector3.new(80, 2, 4), Vector3.new(0, 24, 40), Color3.fromRGB(80, 85, 95), Enum.Material.Metal)
-
-    local containers = {
-        { Pos = Vector3.new(-25, 6, -20), Size = Vector3.new(14, 12, 28), Color = Color3.fromRGB(150, 40, 40) },
-        { Pos = Vector3.new(30, 6, -15), Size = Vector3.new(28, 12, 14), Color = Color3.fromRGB(40, 80, 150) },
-        { Pos = Vector3.new(-20, 6, 30), Size = Vector3.new(24, 12, 14), Color = Color3.fromRGB(45, 120, 60) },
-        { Pos = Vector3.new(25, 6, 35), Size = Vector3.new(14, 12, 24), Color = Color3.fromRGB(160, 100, 30) },
-        { Pos = Vector3.new(-25, 18, -20), Size = Vector3.new(14, 12, 24), Color = Color3.fromRGB(70, 75, 85) }
-    }
-
-    for _, c in containers do
-        createWall("Container", c.Size, c.Pos, c.Color, Enum.Material.DiamondPlate)
-        table.insert(lootSpawnPoints, c.Pos + Vector3.new(0, c.Size.Y / 2 + 1.5, 0))
-    end
-
-    table.insert(lootSpawnPoints, Vector3.new(0, 1.5, 0))
-    table.insert(lootSpawnPoints, Vector3.new(-50, 1.5, -50))
-    table.insert(lootSpawnPoints, Vector3.new(50, 1.5, 50))
-    table.insert(lootSpawnPoints, Vector3.new(-50, 1.5, 50))
-    table.insert(lootSpawnPoints, Vector3.new(50, 1.5, -50))
-
-    local lampPositions = {
-        Vector3.new(0, 20, -78), Vector3.new(0, 20, 78),
-        Vector3.new(-78, 20, 0), Vector3.new(78, 20, 0)
-    }
-    for _, lPos in lampPositions do
-        local lampPart = createWall("LampPart", Vector3.new(4, 1, 1), lPos, Color3.fromRGB(255, 120, 40), Enum.Material.Neon)
-        local pLight = Instance.new("PointLight")
-        pLight.Range = 25
-        pLight.Brightness = 1.0
-        pLight.Color = Color3.fromRGB(255, 140, 50)
-        pLight.Shadows = false
-        pLight.Parent = lampPart
-    end
-
-    -- Запертое хранилище
-    createWall("VaultWallW", Vector3.new(2, 14, 20), Vector3.new(50, 7, -30), Color3.fromRGB(20, 22, 25), Enum.Material.Metal)
-    createWall("VaultWallN", Vector3.new(20, 14, 2), Vector3.new(60, 7, -40), Color3.fromRGB(20, 22, 25), Enum.Material.Metal)
-    createWall("VaultRoof", Vector3.new(20, 2, 20), Vector3.new(60, 14, -30), Color3.fromRGB(15, 18, 20), Enum.Material.Metal)
-
-    local vaultDoor = createWall("VaultDoor", Vector3.new(18, 12, 1.5), Vector3.new(60, 6, -20), Color3.fromRGB(180, 50, 50), Enum.Material.DiamondPlate)
-    local doorPrompt = Instance.new("ProximityPrompt")
-    doorPrompt.ActionText = "Взломать"
-    doorPrompt.ObjectText = "Сейфовая дверь"
-    doorPrompt.KeyboardKeyCode = Enum.KeyCode.E
-    doorPrompt.HoldDuration = 2.5
-    doorPrompt.MaxActivationDistance = 9
-    doorPrompt.RequiresLineOfSight = false
-    doorPrompt.Parent = vaultDoor
-
-    doorPrompt.Triggered:Connect(function(player)
-        if eliminatedPlayers[player] then return end
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then return end
-        doorPrompt.Enabled = false
-        vaultDoor.Transparency = 0.8
-        vaultDoor.CanCollide = false
-        vaultDoor.Color = Color3.fromRGB(50, 200, 80)
-        currentSuspiciousNoise = { Position = vaultDoor.Position, Radius = 120, Timestamp = os.clock() }
+    return MapBuilder.BuildFacility(nil, function(player, vaultPosition)
+        currentSuspiciousNoise = { Position = vaultPosition, Radius = 120, Timestamp = os.clock() }
         local inv = playerInventories[player]
         if inv then inventoryUpdatedEvent:FireClient(player, inv, "Сработала сирена сейфа!") end
     end)
-
-    table.insert(lootSpawnPoints, Vector3.new(60, 1.5, -30))
-    table.insert(lootSpawnPoints, Vector3.new(65, 1.5, -35))
-
-    -- Персональные убежища строятся HideoutBuilder для каждого игрока.
-
-    return lootSpawnPoints
 end
 
-local activeLootPositions = BuildFacility()
+local activeMap = BuildFacility()
+local activeLootPositions = activeMap.LootSpawnPoints
 
 -- ========================================================
 -- 5. ХАЗАРДЫ: ЛАЗЕРЫ
 -- ========================================================
 local function SpawnLasers()
     hazardsContainer:ClearAllChildren()
-    local laserConfigs = {
-        { Pos = Vector3.new(0, 2.5, -15), Size = Vector3.new(50, 0.4, 0.4) },
-        { Pos = Vector3.new(0, 2.5, 25), Size = Vector3.new(50, 0.4, 0.4) },
-        { Pos = Vector3.new(60, 2.5, -20), Size = Vector3.new(18, 0.4, 0.4) }
-    }
+    local laserConfigs = activeMap.LaserConfigs
     for _, lData in laserConfigs do
         local laser = Instance.new("Part")
         laser.Name = "AlarmLaser"
@@ -357,8 +239,7 @@ end
 local function SpawnGroundWeapon(spawnPos)
     local weaponPart = Instance.new("Part")
     weaponPart.Name = "TaserPickup"
-    weaponPart.Size = Vector3.new(1.8, 0.6, 1.2)
-    weaponPart.CFrame = CFrame.new(spawnPos)
+    weaponPart.Size = Vector3.new(1.8, 0.6, 1.2)    weaponPart.CFrame = CFrame.new(spawnPos)
     weaponPart.Material = Enum.Material.Metal
     weaponPart.Color = Color3.fromRGB(240, 200, 30)
     weaponPart.Anchored = true
@@ -475,8 +356,7 @@ end)
 -- ========================================================
 -- 8. ИНВЕНТАРЬ И ПОДБОР ЛУТА
 -- ========================================================
-local function SendOwnedLoadouts(player)
-    loadoutsUpdatedEvent:FireClient(player, playerOwnedLoadouts[player] or { Default = true })
+local function SendOwnedLoadouts(player)    loadoutsUpdatedEvent:FireClient(player, playerOwnedLoadouts[player] or { Default = true })
 end
 
 getOwnedLoadoutsFunction.OnServerInvoke = function(player)
@@ -537,8 +417,7 @@ local function SpawnLootItem(lootData, spawnPosition)
         if character then
             local humanoid = character:FindFirstChildOfClass("Humanoid")
             if humanoid then
-                humanoid.WalkSpeed = LootLogic.CalculateWalkSpeed(inv.TotalWeight, effectiveMaxWeight, currentLoadout.WalkSpeed, Config.MinWalkSpeed)
-            end
+                humanoid.WalkSpeed = LootLogic.CalculateWalkSpeed(inv.TotalWeight, effectiveMaxWeight, currentLoadout.WalkSpeed, Config.MinWalkSpeed)            end
         end
 
         itemPart:Destroy()
@@ -656,7 +535,6 @@ local function SavePlayerData(player)
             Battery = math.clamp(math.floor(upg.Battery or 0), 0, 3),
         }
     }
-
     local success, err = pcall(function()
         PlayerDataStore:UpdateAsync("Player_" .. player.UserId, function()
             return dataToSave
@@ -718,7 +596,6 @@ selectLoadoutEvent.OnServerEvent:Connect(function(player, loadoutId)
             local leaderstats = player:FindFirstChild("leaderstats")
             local cash = leaderstats and leaderstats:FindFirstChild("Cash")
             if not cash then return end
-
             local canBuy, newCash = LootLogic.CanAffordLoadout(cash.Value, targetLoadout.Cost)
             if not canBuy then
                 inventoryUpdatedEvent:FireClient(player, playerInventories[player], "Недостаточно средств для покупки комплекта.")
@@ -837,8 +714,7 @@ local function InitPlayer(player)
         SpawnCFrame = spawnCFrame,
         Data = hideoutData,
     }
-    dealerPrompt.Triggered:Connect(function(triggeringPlayer)
-        if triggeringPlayer ~= player then return end
+    dealerPrompt.Triggered:Connect(function(triggeringPlayer)        if triggeringPlayer ~= player then return end
         local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
         upgradesUpdatedEvent:FireClient(player, upg, true)
     end)
@@ -868,7 +744,7 @@ local function InitPlayer(player)
         if currentPhaseValue.Value == "LobbyPhase" or eliminatedPlayers[player] then
             char:PivotTo(GetHideoutSpawn(player))
         else
-            char:PivotTo(CFrame.new(0, 3, -65))
+            char:PivotTo(CFrame.new(activeMap.RaidSpawnPosition))
         end
 
         local hum = char:WaitForChild("Humanoid")
@@ -897,7 +773,6 @@ local function InitPlayer(player)
                     local offset = Vector3.new(math.cos(angle) * 3, 1.5, math.sin(angle) * 3)
                     SpawnLootItem(item, deathPosition + offset)
                 end
-
                 local lostValue = inv.TotalValue
                 inv.Items = {}
                 inv.TotalWeight = 0
@@ -1018,8 +893,7 @@ Players.PlayerRemoving:Connect(function(player)
     playerUpgrades[player] = nil
     playerDataLoaded[player] = nil
     remoteActionTimes[player] = nil
-    playerLaserHitTimes[player] = nil
-    eliminatedPlayers[player] = nil
+    playerLaserHitTimes[player] = nil    eliminatedPlayers[player] = nil
     extractingPlayers[player] = nil
 end)
 
@@ -1045,7 +919,7 @@ end)
 -- ========================================================
 -- 9. ИИ ОХРАННИКА
 -- ========================================================
-local function CreateGuardNPC(spawnPos)
+local function CreateGuardNPC(spawnPos, patrolWaypoints)
     local oldGuard = workspace:FindFirstChild("GuardNPC")
     if oldGuard then oldGuard:Destroy() end
     guardAlertUntil = 0
@@ -1078,7 +952,6 @@ local function CreateGuardNPC(spawnPos)
     weld.Part0 = root
     weld.Part1 = head
     weld.Parent = head
-
     local bb = Instance.new("BillboardGui")
     bb.Size = UDim2.new(0, 140, 0, 30)
     bb.StudsOffset = Vector3.new(0, 3.2, 0)
@@ -1111,14 +984,7 @@ local function CreateGuardNPC(spawnPos)
 
     model.Parent = workspace
 
-    local waypoints = {
-        Vector3.new(-45, 3, -45),
-        Vector3.new(45, 3, -45),
-        Vector3.new(50, 3, -15),
-        Vector3.new(45, 3, 45),
-        Vector3.new(-45, 3, 45),
-        Vector3.new(0, 3, 0)
-    }
+    local waypoints = patrolWaypoints
     local currentWaypointIndex = 1
     local currentState = "Patrol"
     local investigateTarget = nil
@@ -1206,8 +1072,7 @@ local function CreateGuardNPC(spawnPos)
                         rayParams.FilterDescendantsInstances = { model, char, smokesContainer }
                         rayParams.FilterType = Enum.RaycastFilterType.Exclude
                         local hit = workspace:Raycast(root.Position, playerRoot.Position - root.Position, rayParams)
-                        if not hit then
-                            targetChar = char
+                        if not hit then                            targetChar = char
                             lastKnownPlayerPosition = playerRoot.Position
                             break
                         end
@@ -1257,8 +1122,7 @@ local function CreateGuardNPC(spawnPos)
                         searchMoveIssued = true
                         NavigateTo(lastKnownPlayerPosition)
                     end
-                    local searchElapsed = os.clock() - searchStartedAt
-                    if (root.Position - lastKnownPlayerPosition).Magnitude <= 8 then
+                    local searchElapsed = os.clock() - searchStartedAt                    if (root.Position - lastKnownPlayerPosition).Magnitude <= 8 then
                         if searchElapsed < SEARCH_DURATION then
                             root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, searchElapsed * math.rad(100), 0)
                         else
@@ -1307,14 +1171,14 @@ end
 -- ========================================================
 -- 10. ЭВАКУАЦИЯ И ЦИКЛ РАУНДОВ
 -- ========================================================
-local function CreateExtractionZone()
+local function CreateExtractionZone(extractionPosition)
     local oldZone = workspace:FindFirstChild("ExtractionZone")
     if oldZone then oldZone:Destroy() end
 
     local zone = Instance.new("Part")
     zone.Name = "ExtractionZone"
     zone.Size = Vector3.new(22, 8, 22)
-    zone.Position = Vector3.new(0, 4, 70)
+    zone.Position = extractionPosition
     zone.Anchored = true
     zone.CanCollide = false
     zone.CanQuery = false
@@ -1328,7 +1192,7 @@ local function CreateExtractionZone()
     local pad = Instance.new("Part")
     pad.Name = "ExtractionPad"
     pad.Size = Vector3.new(22, 0.4, 22)
-    pad.Position = Vector3.new(0, 0.2, 70)
+    pad.Position = Vector3.new(extractionPosition.X, 0.2, extractionPosition.Z)
     pad.Anchored = true
     pad.CanCollide = true
     pad.Material = Enum.Material.DiamondPlate
@@ -1388,7 +1252,6 @@ startRaidEvent.OnServerEvent:Connect(function(player)
         warn("[Raid] Start rejected: player is not inside their hideout")
         return
     end
-
     raidStartRequested = true
     print("[Raid] Start requested by", player.Name)
 end)
@@ -1429,15 +1292,18 @@ task.spawn(function()
             task.wait(0.2)
         end
 
+        -- Generate a fresh, seeded layout for every raid.
+        activeMap = BuildFacility()
+        activeLootPositions = activeMap.LootSpawnPoints
+
         -- Фаза Сбора Лута
         currentPhaseValue.Value = "LootPhase"
         for _, p in Players:GetPlayers() do
-            if p.Character then p.Character:PivotTo(CFrame.new(Vector3.new(math.random(-15, 15), 3, -65))) end
+            if p.Character then p.Character:PivotTo(CFrame.new(activeMap.RaidSpawnPosition + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5)))) end
         end
 
         lootContainer:ClearAllChildren()
         weaponsContainer:ClearAllChildren()
-
         local nightEvent = NightEvents.Pick(math.random())
         for _, pos in activeLootPositions do
             local baseItem = Config.LootTable[math.random(1, #Config.LootTable)]
@@ -1446,21 +1312,21 @@ task.spawn(function()
         end
 
         if nightEvent.JackpotLoot then
-            SpawnLootItem(nightEvent.JackpotLoot, Vector3.new(62, 1.5, -33))
+            SpawnLootItem(nightEvent.JackpotLoot, activeMap.VaultLootPosition)
         end
 
-        SpawnGroundWeapon(Vector3.new(30, 13.5, -15))
-        SpawnGroundWeapon(Vector3.new(-20, 13.5, 30))
+        SpawnGroundWeapon(activeMap.TaserPositions[1])
+        SpawnGroundWeapon(activeMap.TaserPositions[2])
 
         SpawnLasers()
-        CreateGuardNPC(Vector3.new(-15, 3, -15))
+        CreateGuardNPC(activeMap.GuardSpawnPosition, activeMap.GuardWaypoints)
         stateChangedEvent:FireAllClients("LootPhase", Config.LootDuration)
         ApplyNightEvent(nightEvent)
         task.wait(Config.LootDuration)
 
         -- Фаза Эвакуации
         currentPhaseValue.Value = "ExtractionPhase"
-        local zone = CreateExtractionZone()
+        local zone = CreateExtractionZone(activeMap.ExtractionPosition)
         stateChangedEvent:FireAllClients("ExtractionPhase", Config.ExtractionDuration)
 
         local phaseEnd = os.clock() + Config.ExtractionDuration
@@ -1568,8 +1434,7 @@ game:BindToClose(function()
     local playersToSave = Players:GetPlayers()
     local pendingSaves = #playersToSave
 
-    if pendingSaves == 0 then
-        return
+    if pendingSaves == 0 then        return
     end
 
     for _, player in playersToSave do
