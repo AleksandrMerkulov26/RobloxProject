@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
+local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
 
 local totalCount = 0
 local passCount = 0
@@ -179,6 +180,46 @@ local function RunSuite()
 
     local effLight = LootLogic.GetEffectiveFlashlightRange(75, 1)
     AssertTest("Дальность фонаря 75 + акб 1 ур (+15 studs) = 90 studs", effLight, 90)
+
+    -- ----------------------------------------------------
+    -- БЛОК 10: СЕРИЯ УСПЕШНЫХ РЕЙДОВ
+    -- ----------------------------------------------------
+    print("\n-- [10. Серия рейдов и бонус к выручке] --")
+    AssertTest("Серия 0 -> бонус 0%", LootLogic.GetStreakBonusPercent(0), 0)
+    AssertTest("Серия 1 -> бонус 10%", LootLogic.GetStreakBonusPercent(1), 10)
+    AssertTest("Серия 3 -> бонус 30%", LootLogic.GetStreakBonusPercent(3), 30)
+    AssertTest("Серия 5 -> бонус 50% (максимум)", LootLogic.GetStreakBonusPercent(5), 50)
+    AssertTest("Серия выше лимита не увеличивает бонус", LootLogic.GetStreakBonusPercent(9), 50)
+    AssertTest("Отрицательная серия даёт нулевой бонус", LootLogic.GetStreakBonusPercent(-2), 0)
+    AssertTest("Без серии выплата не меняется", LootLogic.ApplyStreakBonus(1000, 0), 1000)
+    AssertTest("Серия 3: выплата 1000 -> 1300", LootLogic.ApplyStreakBonus(1000, 3), 1300)
+    AssertTest("Дробная часть выплаты округляется вниз", LootLogic.ApplyStreakBonus(155, 1), 170)
+
+    -- ----------------------------------------------------
+    -- БЛОК 11: НОЧНЫЕ СОБЫТИЯ
+    -- ----------------------------------------------------
+    print("\n-- [11. Ночные события] --")
+    AssertTest("roll 0.15 выбирает Чёрную ночь", NightEvents.Pick(0.15).Id, "Blackout")
+    AssertTest("roll 0.4 выбирает Красную тревогу", NightEvents.Pick(0.4).Id, "RedAlert")
+    AssertTest("roll 0.6 выбирает Джекпот", NightEvents.Pick(0.6).Id, "Jackpot")
+    AssertTest("roll 0.9 выбирает Тихую ночь", NightEvents.Pick(0.9).Id, "Calm")
+    AssertTest("У всех событий положительный вес", (function()
+        for _, event in ipairs(NightEvents.Events) do
+            if event.Weight <= 0 then return false end
+        end
+        return true
+    end)(), true)
+    local baseLoot = { Name = "Тест", Value = 100, Weight = 2, Color = Color3.new(1, 1, 1), Fragile = true }
+    local scaledLoot = NightEvents.ScaleLootValue(baseLoot, 1.5)
+    AssertTest("Множитель 1.5 повышает стоимость 100 до 150", scaledLoot.Value, 150)
+    AssertTest("Масштабирование не меняет вес предмета", scaledLoot.Weight, 2)
+    AssertTest("Исходный предмет остаётся неизменным", baseLoot.Value, 100)
+    local awareness = LootLogic.GetGuardAwareness(false)
+    local blackoutAwareness = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.15))
+    AssertTest("Чёрная ночь уменьшает обзор охранника", blackoutAwareness.ViewDistance, 38.5)
+    local alertAwareness = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.4))
+    AssertTest("Красная тревога увеличивает обзор охранника", alertAwareness.ViewDistance, 66)
+    AssertTest("Джекпот содержит корону", NightEvents.Pick(0.6).JackpotLoot.Name, "Золотая корона")
 
     print("\n--------------------------------------------------------")
     if failCount == 0 then
