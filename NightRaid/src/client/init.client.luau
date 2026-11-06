@@ -35,6 +35,8 @@ local fireTaserEvent = networkFolder:WaitForChild("FireTaser")
 local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade")
 local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
 local openHideoutStationEvent = networkFolder:WaitForChild("OpenHideoutStation")
+local nightEventEvent = networkFolder:WaitForChild("NightEvent")
+local currentNightEventValue = networkFolder:WaitForChild("CurrentNightEvent")
 local getRaidStatusFunction = networkFolder:WaitForChild("GetRaidStatus")
 local startRaidEvent = networkFolder:WaitForChild("StartRaid")
 
@@ -1079,5 +1081,82 @@ local function CreateTimerUI()
 end
 
 task.spawn(CreateTimerUI)
+
+
+-- ==========================================
+-- ИНДИКАТОР НОЧНОГО СОБЫТИЯ
+-- ==========================================
+local function CreateNightEventUI()
+    local playerGui = player:WaitForChild("PlayerGui")
+    local oldGui = playerGui:FindFirstChild("NightEventGui")
+    if oldGui then oldGui:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "NightEventGui"
+    gui.ResetOnSpawn = false
+    gui.Parent = playerGui
+
+    local banner = Instance.new("Frame")
+    banner.Name = "Banner"
+    banner.Size = UDim2.new(0, 430, 0, 94)
+    banner.Position = UDim2.new(0.5, -215, 0, 24)
+    banner.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
+    banner.BackgroundTransparency = 0.12
+    banner.Visible = false
+    banner.Parent = gui
+    Instance.new("UICorner", banner).CornerRadius = UDim.new(0, 10)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 32)
+    title.Position = UDim2.new(0, 10, 0, 7)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 21
+    title.TextColor3 = Color3.fromRGB(255, 200, 80)
+    title.Text = ""
+    title.Parent = banner
+
+    local description = Instance.new("TextLabel")
+    description.Size = UDim2.new(1, -24, 0, 44)
+    description.Position = UDim2.new(0, 12, 0, 42)
+    description.BackgroundTransparency = 1
+    description.Font = Enum.Font.GothamMedium
+    description.TextSize = 13
+    description.TextWrapped = true
+    description.TextColor3 = Color3.fromRGB(235, 235, 235)
+    description.Text = ""
+    description.Parent = banner
+
+    local generation = 0
+    local function refreshCurrentEvent()
+        local eventName = currentNightEventValue.Value
+        if eventName == "" then
+            banner.Visible = false
+        else
+            title.Text = eventName
+            banner.Visible = true
+        end
+    end
+
+    currentNightEventValue.Changed:Connect(refreshCurrentEvent)
+    nightEventEvent.OnClientEvent:Connect(function(_eventId, eventName, eventDescription)
+        if type(eventName) ~= "string" or eventName == "" then return end
+        generation += 1
+        local currentGeneration = generation
+        title.Text = eventName
+        description.Text = type(eventDescription) == "string" and eventDescription or ""
+        banner.Visible = true
+
+        task.delay(7, function()
+            if currentGeneration == generation and currentNightEventValue.Value == "" then
+                banner.Visible = false
+            end
+        end)
+    end)
+
+    refreshCurrentEvent()
+end
+
+task.spawn(CreateNightEventUI)
 
 print("[КЛИЕНТ]: Клиентский контроллер активен. Сбор [E], Крюк [Q], Фонарь [F], Дым [G].")
