@@ -175,4 +175,18 @@ function LootLogic.GetEffectiveFlashlightRange(baseRange: number, batteryLevel: 
     return baseRange + bonus
 end
 
+-- Бонус за серию успешных эвакуаций: +10% за каждую, максимум +50%.
+LootLogic.StreakBonusPercentPerRaid = 10
+LootLogic.MaxStreakBonusPercent = 50
+
+function LootLogic.GetStreakBonusPercent(streak: number): number
+    local count = math.max(0, math.floor(streak or 0))
+    return math.min(count * LootLogic.StreakBonusPercentPerRaid, LootLogic.MaxStreakBonusPercent)
+end
+
+function LootLogic.ApplyStreakBonus(baseValue: number, streak: number): number
+    local percent = LootLogic.GetStreakBonusPercent(streak)
+    return math.floor(baseValue * (100 + percent) / 100)
+end
+
 return LootLogic
