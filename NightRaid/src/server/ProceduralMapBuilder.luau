@@ -100,7 +100,7 @@ function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player, Vector3
     local doorPanel = Instance.new("Part")
     doorPanel.Name = "VaultDoorPanel"
     doorPanel.Size = Vector3.new(0.35, 8, 0.35)
-    doorPanel.Position = door.Position + Vector3.new(-3, 0, -0.9)
+    doorPanel.Position = rotate(Vector3.new(-3, 6, -42.9), rotation)
     doorPanel.Anchored = true
     doorPanel.Material = Enum.Material.Neon
     doorPanel.Color = amber
@@ -251,8 +251,8 @@ function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player, Vector3
         RaidSpawnPosition = rotate(Vector3.new(0, 3, 65), rotation),
         VaultLootPosition = rotate(Vector3.new(0, FLOOR_LOOT_HEIGHT, -52), rotation),
         TaserPositions = {
-            rotate(Vector3.new(-35, 1.3, 8), rotation),
-            rotate(Vector3.new(35, 1.3, 8), rotation),
+            rotate(Vector3.new(-35, 0.3, 8), rotation),
+            rotate(Vector3.new(35, 0.3, 8), rotation),
         },
         Rotation = rotation,
     }
