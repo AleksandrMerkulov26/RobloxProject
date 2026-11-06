@@ -69,7 +69,7 @@ function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player) -> ())?
         if not humanoid or humanoid.Health <= 0 or not prompt.Enabled then return end
         prompt.Enabled, door.Transparency, door.CanCollide = false, 0.8, false
         door.Color = Color3.fromRGB(50,200,80)
-        if onVaultAlarm then onVaultAlarm(player) end
+        if onVaultAlarm then onVaultAlarm(player, door.Position) end
     end)
 
     for _, position in ipairs({ Vector3.new(0,20,-78), Vector3.new(0,20,78), Vector3.new(-78,20,0), Vector3.new(78,20,0) }) do
