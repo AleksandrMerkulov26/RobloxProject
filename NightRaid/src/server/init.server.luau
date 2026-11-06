@@ -285,6 +285,10 @@ local function BuildFacility()
     doorPrompt.Parent = vaultDoor
 
     doorPrompt.Triggered:Connect(function(player)
+        if eliminatedPlayers[player] then return end
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return end
         doorPrompt.Enabled = false
         vaultDoor.Transparency = 0.8
         vaultDoor.CanCollide = false
@@ -855,6 +859,7 @@ local function InitPlayer(player)
 
     playerInventories[player] = { TotalValue = 0, TotalWeight = 0, Items = {}, Escaped = false }
     eliminatedPlayers[player] = false
+    player:SetAttribute("Eliminated", false)
     ApplyLoadoutToPlayer(player, Config.Loadouts[1])
     SendOwnedLoadouts(player)
 
@@ -879,6 +884,7 @@ local function InitPlayer(player)
             -- Elimination is independent from inventory contents and extraction state.
             if raidIsActive then
                 eliminatedPlayers[player] = true
+                player:SetAttribute("Eliminated", true)
             end
             extractingPlayers[player] = nil
 
@@ -1390,6 +1396,7 @@ end)
 local function ResetPlayersForRound()
     for player, inv in playerInventories do
         eliminatedPlayers[player] = false
+        player:SetAttribute("Eliminated", false)
         inv.TotalValue = 0
         inv.TotalWeight = 0
         inv.Items = {}
