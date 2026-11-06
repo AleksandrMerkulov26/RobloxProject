@@ -4,8 +4,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RaidProgression = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RaidProgression"))
 
 local checks = {
-    { "dead player waits during raid", RaidProgression.ShouldRespawn(true, "LootPhase"), false },
-    { "dead player waits during extraction", RaidProgression.ShouldRespawn(true, "ExtractionPhase"), false },
+    { "dead player respawns during raid", RaidProgression.ShouldRespawn(true, "LootPhase"), true },
+    { "dead player respawns during extraction", RaidProgression.ShouldRespawn(true, "ExtractionPhase"), true },
+    { "death during raid marks player eliminated", RaidProgression.ShouldEliminate("LootPhase"), true },
+    { "death in lobby does not mark player eliminated", RaidProgression.ShouldEliminate("LobbyPhase"), false },
     { "dead player respawns in lobby", RaidProgression.ShouldRespawn(true, "LobbyPhase"), true },
     { "living player is not respawned", RaidProgression.ShouldRespawn(false, "LobbyPhase"), false },
     { "loot drops during active loot phase", RaidProgression.ShouldDropLoot("LootPhase", false, 1), true },
