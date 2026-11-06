@@ -39,10 +39,12 @@ jobs:
         working-directory: NightRaid
         run: rojo build test.project.json --output /tmp/NightRaidTests.rbxlx
 
-      - name: Set up Lune
-        uses: lune-org/setup-lune@v1
-        with:
-          lune-version: 0.8.9
+      - name: Set up Rokit
+        uses: CompeyDev/setup-rokit@v0.1.2
+
+      - name: Install test runtime
+        working-directory: NightRaid
+        run: rokit install
 
       - name: Run deterministic raid progression tests
         working-directory: NightRaid
