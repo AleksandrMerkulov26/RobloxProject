@@ -161,11 +161,12 @@ function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player, Vector3
         offset: Vector3,
         color: Color3,
         material: Enum.Material?,
-        shape: Enum.PartType?
+        shape: Enum.PartType?,
+        yawOffset: number?
     )
         local worldPosition = rotate(center + offset, rotation)
         local object = part(name, size, worldPosition, color, material or Enum.Material.Metal)
-        object.Orientation = Vector3.new(0, rotation * 90, 0)
+        object.Orientation = Vector3.new(0, (rotation + (yawOffset or 0)) * 90, 0)
         if shape then object.Shape = shape end
         return object
     end
@@ -189,11 +190,11 @@ function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player, Vector3
         for i = 0, 3 do
             propPart("GeneratorVent", Vector3.new(0.22, 3.4, 0.16), center, Vector3.new(1.1 + i * 0.65, 0, 4.34), steel)
         end
-        propPart("GeneratorFan", Vector3.new(2.8, 2.8, 0.45), center, Vector3.new(-3.8, -0.7, 4.35), darkSteel, Enum.Material.Metal, Enum.PartType.Cylinder)
-        propPart("GeneratorFanHub", Vector3.new(0.9, 0.9, 0.5), center, Vector3.new(-3.8, -0.7, 4.62), amber, Enum.Material.Neon, Enum.PartType.Cylinder)
+        propPart("GeneratorFan", Vector3.new(0.45, 2.8, 2.8), center, Vector3.new(-3.8, -0.7, 4.35), darkSteel, Enum.Material.Metal, Enum.PartType.Cylinder, 1)
+        propPart("GeneratorFanHub", Vector3.new(0.5, 0.9, 0.9), center, Vector3.new(-3.8, -0.7, 4.62), amber, Enum.Material.Neon, Enum.PartType.Cylinder, 1)
         for _, x in ipairs({ -3.8, 3.8 }) do
-            propPart("GeneratorExhaust", Vector3.new(1.1, 3, 1.1), center, Vector3.new(x, 5, -1.8), steel, Enum.Material.Metal, Enum.PartType.Cylinder)
-            propPart("GeneratorExhaustCap", Vector3.new(1.5, 0.35, 1.5), center, Vector3.new(x, 6.6, -1.8), darkSteel, Enum.Material.Metal, Enum.PartType.Cylinder)
+            propPart("GeneratorExhaust", Vector3.new(1.1, 3, 1.1), center, Vector3.new(x, 5, -1.8), steel)
+            propPart("GeneratorExhaustCap", Vector3.new(1.5, 0.35, 1.5), center, Vector3.new(x, 6.6, -1.8), darkSteel)
         end
         machineLight("GeneratorStatusGreen", center, Vector3.new(-2.1, -1.4, 4.35), Color3.fromRGB(65, 255, 115))
         machineLight("GeneratorStatusAmber", center, Vector3.new(-1.1, -1.4, 4.35), amber)
@@ -248,7 +249,7 @@ function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player, Vector3
 
     -- Visible overhead pipes connect the technical zones.
     for _, x in ipairs({ -58, 52 }) do
-        propPart("UtilityPipe", Vector3.new(1.2, 1.2, 34), Vector3.new(x, 0, -48), Vector3.new(0, 12, 0), steel, Enum.Material.Metal, Enum.PartType.Cylinder)
+        propPart("UtilityPipe", Vector3.new(1.2, 1.2, 34), Vector3.new(x, 0, -48), Vector3.new(0, 12, 0), steel, Enum.Material.Metal, Enum.PartType.Cylinder, 1)
         propPart("PipeSupport", Vector3.new(2, 0.5, 2), Vector3.new(x, 0, -48), Vector3.new(0, 10.5, 0), amber, Enum.Material.Neon)
     end
 
