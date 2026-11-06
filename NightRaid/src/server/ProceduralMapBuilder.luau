@@ -152,20 +152,105 @@ function MapBuilder.BuildFacility(seed: number?, onVaultAlarm: ((Player, Vector3
     place("CableTray", Vector3.new(2, 1, 130), Vector3.new(-22, 26, 0), steel, Enum.Material.Metal)
     place("CableTray", Vector3.new(2, 1, 130), Vector3.new(22, 26, 0), steel, Enum.Material.Metal)
 
-    -- Equipment props replace the repetitive shipping-container look.
-    local function equipment(name: string, position: Vector3, size: Vector3, accent: Color3)
-        local body = place(name, size, position, steel, Enum.Material.Metal)
-        local panelPosition = position + Vector3.new(0, 0, size.Z / 2 + 0.08)
-        local panel = place(name .. "Panel", Vector3.new(size.X * 0.55, size.Y * 0.45, 0.15), panelPosition, darkSteel, Enum.Material.Metal)
-        local indicator = place(name .. "Indicator", Vector3.new(0.35, 0.35, 0.2), panelPosition + Vector3.new(0, 0, 0.12), accent, Enum.Material.Neon)
-        indicator.CanCollide = false
-        return body, panel
+    -- Detailed industrial props. Each machine is assembled from recognizable parts,
+    -- rather than one plain block. Local offsets rotate with the facility layout.
+    local function propPart(
+        name: string,
+        size: Vector3,
+        center: Vector3,
+        offset: Vector3,
+        color: Color3,
+        material: Enum.Material?,
+        shape: Enum.PartType?
+    )
+        local worldPosition = rotate(center + offset, rotation)
+        local object = part(name, size, worldPosition, color, material or Enum.Material.Metal)
+        object.Orientation = Vector3.new(0, rotation * 90, 0)
+        if shape then object.Shape = shape end
+        return object
     end
 
-    equipment("GeneratorUnit", Vector3.new(-52, 5, -48), Vector3.new(12, 10, 8), amber)
-    equipment("PowerControl", Vector3.new(52, 5, -48), Vector3.new(10, 10, 8), cyan)
-    equipment("ServerRack", Vector3.new(-58, 6, 4), Vector3.new(7, 12, 7), cyan)
-    equipment("SecurityConsole", Vector3.new(58, 5, 4), Vector3.new(9, 10, 7), Color3.fromRGB(220, 55, 55))
+    local function machineLight(name: string, center: Vector3, offset: Vector3, color: Color3)
+        local led = propPart(name, Vector3.new(0.28, 0.28, 0.12), center, offset, color, Enum.Material.Neon)
+        led.CanCollide = false
+        local light = Instance.new("PointLight")
+        light.Color = color
+        light.Range = 7
+        light.Brightness = 0.45
+        light.Parent = led
+        return led
+    end
+
+    local function generator(center: Vector3)
+        propPart("GeneratorBase", Vector3.new(15, 1, 10), center, Vector3.new(0, -4.5, 0), darkSteel, Enum.Material.DiamondPlate)
+        propPart("GeneratorHousing", Vector3.new(12, 7, 8), center, Vector3.new(0, 0, 0), steel)
+        propPart("GeneratorFrontPanel", Vector3.new(8, 4.5, 0.25), center, Vector3.new(0, 0, 4.15), darkSteel)
+        propPart("GeneratorDisplay", Vector3.new(2.4, 1.3, 0.18), center, Vector3.new(-2.1, 1.1, 4.34), cyan, Enum.Material.Neon)
+        for i = 0, 3 do
+            propPart("GeneratorVent", Vector3.new(0.22, 3.4, 0.16), center, Vector3.new(1.1 + i * 0.65, 0, 4.34), steel)
+        end
+        propPart("GeneratorFan", Vector3.new(2.8, 2.8, 0.45), center, Vector3.new(-3.8, -0.7, 4.35), darkSteel, Enum.Material.Metal, Enum.PartType.Cylinder)
+        propPart("GeneratorFanHub", Vector3.new(0.9, 0.9, 0.5), center, Vector3.new(-3.8, -0.7, 4.62), amber, Enum.Material.Neon, Enum.PartType.Cylinder)
+        for _, x in ipairs({ -3.8, 3.8 }) do
+            propPart("GeneratorExhaust", Vector3.new(1.1, 3, 1.1), center, Vector3.new(x, 5, -1.8), steel, Enum.Material.Metal, Enum.PartType.Cylinder)
+            propPart("GeneratorExhaustCap", Vector3.new(1.5, 0.35, 1.5), center, Vector3.new(x, 6.6, -1.8), darkSteel, Enum.Material.Metal, Enum.PartType.Cylinder)
+        end
+        machineLight("GeneratorStatusGreen", center, Vector3.new(-2.1, -1.4, 4.35), Color3.fromRGB(65, 255, 115))
+        machineLight("GeneratorStatusAmber", center, Vector3.new(-1.1, -1.4, 4.35), amber)
+    end
+
+    local function serverRack(center: Vector3)
+        propPart("ServerRackBase", Vector3.new(9, 0.7, 8), center, Vector3.new(0, -5.7, 0), darkSteel, Enum.Material.DiamondPlate)
+        propPart("ServerRackFrame", Vector3.new(7, 11, 6), center, Vector3.new(0, 0, 0), darkSteel)
+        for i = 0, 4 do
+            local y = -4 + i * 1.8
+            propPart("ServerTray", Vector3.new(6.2, 1.35, 0.35), center, Vector3.new(0, y, 3.18), steel)
+            propPart("ServerFace", Vector3.new(5.6, 1.05, 0.18), center, Vector3.new(0, y, 3.4), darkSteel)
+            for j = 0, 3 do
+                machineLight("ServerLED", center, Vector3.new(-2.1 + j * 0.42, y, 3.53), j == 0 and amber or cyan)
+            end
+        end
+        for _, x in ipairs({ -3.3, 3.3 }) do
+            propPart("RackRail", Vector3.new(0.25, 10.5, 0.25), center, Vector3.new(x, 0, 3.5), steel)
+        end
+    end
+
+    local function securityConsole(center: Vector3)
+        propPart("ConsolePedestal", Vector3.new(8, 3, 5), center, Vector3.new(0, -3.5, 0), darkSteel)
+        propPart("ConsoleDesk", Vector3.new(10, 0.8, 6), center, Vector3.new(0, -1.5, 0), steel, Enum.Material.DiamondPlate)
+        for i = -1, 1 do
+            propPart("ConsoleMonitor", Vector3.new(2.5, 2, 0.35), center, Vector3.new(i * 3, 0.1, 1.8), darkSteel)
+            propPart("ConsoleScreen", Vector3.new(2.15, 1.55, 0.12), center, Vector3.new(i * 3, 0.1, 2.05), i == 0 and amber or cyan, Enum.Material.Neon)
+        end
+        for i = 0, 4 do
+            machineLight("ConsoleButton", center, Vector3.new(-3.5 + i * 1.7, -1, -1.2), i % 2 == 0 and amber or cyan)
+        end
+    end
+
+    local function powerControl(center: Vector3)
+        propPart("PowerCabinetBase", Vector3.new(12, 1, 9), center, Vector3.new(0, -4.5, 0), darkSteel, Enum.Material.DiamondPlate)
+        propPart("PowerCabinet", Vector3.new(10, 8, 7), center, Vector3.new(0, 0, 0), steel)
+        propPart("PowerDoor", Vector3.new(8.5, 6.5, 0.25), center, Vector3.new(0, 0, 3.65), darkSteel)
+        propPart("PowerDisplay", Vector3.new(3, 1.5, 0.2), center, Vector3.new(-2, 1.7, 3.82), cyan, Enum.Material.Neon)
+        for i = 0, 2 do
+            propPart("PowerSwitch", Vector3.new(0.45, 1.3, 0.35), center, Vector3.new(1 + i * 1.7, -0.2, 3.85), steel)
+            machineLight("PowerIndicator", center, Vector3.new(1 + i * 1.7, 1.1, 3.9), i == 1 and amber or cyan)
+        end
+        for i = 0, 3 do
+            propPart("PowerVent", Vector3.new(0.18, 2.2, 0.15), center, Vector3.new(-3.2 + i * 0.45, -2.3, 3.85), steel)
+        end
+    end
+
+    generator(Vector3.new(-52, 5, -48))
+    powerControl(Vector3.new(52, 5, -48))
+    serverRack(Vector3.new(-58, 6, 4))
+    securityConsole(Vector3.new(58, 5, 4))
+
+    -- Visible overhead pipes connect the technical zones.
+    for _, x in ipairs({ -58, 52 }) do
+        propPart("UtilityPipe", Vector3.new(1.2, 1.2, 34), Vector3.new(x, 0, -48), Vector3.new(0, 12, 0), steel, Enum.Material.Metal, Enum.PartType.Cylinder)
+        propPart("PipeSupport", Vector3.new(2, 0.5, 2), Vector3.new(x, 0, -48), Vector3.new(0, 10.5, 0), amber, Enum.Material.Neon)
+    end
 
     -- Low cover objects are useful in gameplay and visually break up the open floor.
     local covers = {
