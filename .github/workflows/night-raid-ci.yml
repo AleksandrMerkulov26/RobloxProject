@@ -38,3 +38,12 @@ jobs:
       - name: Build test project
         working-directory: NightRaid
         run: rojo build test.project.json --output /tmp/NightRaidTests.rbxlx
+
+      - name: Set up Lune
+        uses: lune-org/setup-lune@v1
+        with:
+          lune-version: 0.8.9
+
+      - name: Run deterministic raid progression tests
+        working-directory: NightRaid
+        run: lune run tests/RaidProgression.spec.luau
