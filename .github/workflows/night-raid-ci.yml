@@ -42,10 +42,6 @@ jobs:
       - name: Set up Rokit
         uses: CompeyDev/setup-rokit@v0.1.2
 
-      - name: Install test runtime
-        working-directory: NightRaid
-        run: rokit install
-
       - name: Run deterministic raid progression tests
         working-directory: NightRaid
         run: lune run tests/RaidProgression.spec.luau
