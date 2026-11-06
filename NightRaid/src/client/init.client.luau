@@ -35,6 +35,8 @@ local fireTaserEvent = networkFolder:WaitForChild("FireTaser")
 local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade")
 local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
 local openHideoutStationEvent = networkFolder:WaitForChild("OpenHideoutStation")
+local nightEventEvent = networkFolder:WaitForChild("NightEvent")
+local currentNightEventValue = networkFolder:WaitForChild("CurrentNightEvent")
 local getRaidStatusFunction = networkFolder:WaitForChild("GetRaidStatus")
 local startRaidEvent = networkFolder:WaitForChild("StartRaid")
 
@@ -1079,5 +1081,99 @@ local function CreateTimerUI()
 end
 
 task.spawn(CreateTimerUI)
+
+
+-- ==========================================
+-- ИНДИКАТОР НОЧНОГО СОБЫТИЯ
+-- ==========================================
+local function CreateNightEventUI()
+    local playerGui = player:WaitForChild("PlayerGui")
+    local oldGui = playerGui:FindFirstChild("NightEventGui")
+    if oldGui then oldGui:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "NightEventGui"
+    gui.ResetOnSpawn = false
+    gui.Parent = playerGui
+
+    local TweenService = game:GetService("TweenService")
+
+    local banner = Instance.new("Frame")
+    banner.Name = "Banner"
+    banner.Size = UDim2.new(0, 390, 0, 82)
+    banner.Position = UDim2.new(0.5, -195, 0, -100)
+    banner.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
+    banner.BackgroundTransparency = 0.08
+    banner.Visible = false
+    banner.Parent = gui
+    Instance.new("UICorner", banner).CornerRadius = UDim.new(0, 10)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 30)
+    title.Position = UDim2.new(0, 10, 0, 7)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 20
+    title.TextColor3 = Color3.fromRGB(255, 200, 80)
+    title.Text = ""
+    title.Parent = banner
+
+    local description = Instance.new("TextLabel")
+    description.Size = UDim2.new(1, -24, 0, 36)
+    description.Position = UDim2.new(0, 12, 0, 39)
+    description.BackgroundTransparency = 1
+    description.Font = Enum.Font.GothamMedium
+    description.TextSize = 12
+    description.TextWrapped = true
+    description.TextColor3 = Color3.fromRGB(235, 235, 235)
+    description.Text = ""
+    description.Parent = banner
+
+    local generation = 0
+    local visiblePosition = UDim2.new(0.5, -195, 0, 20)
+    local hiddenPosition = UDim2.new(0.5, -195, 0, -100)
+
+    local function showEvent(eventName, eventDescription)
+        if type(eventName) ~= "string" or eventName == "" then return end
+        generation += 1
+        local currentGeneration = generation
+        title.Text = eventName
+        description.Text = type(eventDescription) == "string" and eventDescription or ""
+        banner.Visible = true
+        banner.Position = hiddenPosition
+        banner.BackgroundTransparency = 0.08
+
+        TweenService:Create(
+            banner,
+            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { Position = visiblePosition }
+        ):Play()
+
+        task.delay(5, function()
+            if currentGeneration ~= generation then return end
+            local hideTween = TweenService:Create(
+                banner,
+                TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Position = hiddenPosition, BackgroundTransparency = 1 }
+            )
+            hideTween:Play()
+            hideTween.Completed:Wait()
+            if currentGeneration == generation then
+                banner.Visible = false
+            end
+        end)
+    end
+
+    nightEventEvent.OnClientEvent:Connect(function(_eventId, eventName, eventDescription)
+        showEvent(eventName, eventDescription)
+    end)
+
+    -- The value may already be replicated if the UI was created after the event.
+    if currentNightEventValue.Value ~= "" then
+        showEvent(currentNightEventValue.Value, "")
+    end
+end
+
+task.spawn(CreateNightEventUI)
 
 print("[КЛИЕНТ]: Клиентский контроллер активен. Сбор [E], Крюк [Q], Фонарь [F], Дым [G].")

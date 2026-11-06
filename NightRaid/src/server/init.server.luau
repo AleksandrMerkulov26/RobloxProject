@@ -1,5 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+-- Players must stay eliminated after death until the next raid starts.
+Players.CharacterAutoLoads = false
 local DataStoreService = game:GetService("DataStoreService")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
@@ -44,10 +46,15 @@ local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
 local openHideoutStationEvent = getOrCreateRemote("OpenHideoutStation", "RemoteEvent")
 local getRaidStatusFunction = getOrCreateRemote("GetRaidStatus", "RemoteFunction")
 local startRaidEvent = getOrCreateRemote("StartRaid", "RemoteEvent")
+local nightEventEvent = getOrCreateRemote("NightEvent", "RemoteEvent")
+local currentNightEventValue = getOrCreateRemote("CurrentNightEvent", "StringValue")
+currentNightEventValue.Value = ""
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
 local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
+local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
+local RaidProgression = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RaidProgression"))
 
 -- Настройки освещения склада
 Lighting.ClockTime = 0
@@ -58,6 +65,11 @@ Lighting.FogColor = Color3.fromRGB(10, 10, 15)
 Lighting.FogEnd = 160
 Lighting.FogStart = 30
 Lighting.GlobalShadows = false
+local BASE_AMBIENT = Lighting.Ambient
+local BASE_OUTDOOR_AMBIENT = Lighting.OutdoorAmbient
+local BASE_FOG_END = Lighting.FogEnd
+local MAX_STAT_VALUE = 2000000000
+local MAX_STREAK = 5
 
 -- ========================================================
 -- 2. БАЗА ДАННЫХ DATASTORE
@@ -126,8 +138,11 @@ local playerHideoutSlots = {}
 local hideoutSlotOwners = {}
 -- Prevent laser Touched events from damaging one player repeatedly.
 local playerLaserHitTimes = {}
+-- Players eliminated during an active raid stay in their hideout until the next round.
+local eliminatedPlayers = {}
 local remoteActionTimes = {}
 local currentSuspiciousNoise = nil
+local activeNightEvent = NightEvents.None
 local guardStunnedUntil = 0
 local guardAlertUntil = 0
 
@@ -146,6 +161,17 @@ local function canPerformAction(player, actionName, cooldown)
 
     actions[actionName] = now
     return true
+end
+
+local function LoadCharacterForPlayer(player)
+    if player.Parent ~= Players then return end
+
+    local success, err = pcall(function()
+        player:LoadCharacterAsync()
+    end)
+    if not success then
+        warn(string.format("[Raid] Не удалось возродить игрока %s: %s", player.Name, tostring(err)))
+    end
 end
 
 local function isFiniteVector3(value)
@@ -259,6 +285,10 @@ local function BuildFacility()
     doorPrompt.Parent = vaultDoor
 
     doorPrompt.Triggered:Connect(function(player)
+        if eliminatedPlayers[player] then return end
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return end
         doorPrompt.Enabled = false
         vaultDoor.Transparency = 0.8
         vaultDoor.CanCollide = false
@@ -305,7 +335,7 @@ local function SpawnLasers()
             local pHum = char and char:FindFirstChildOfClass("Humanoid")
             local player = Players:GetPlayerFromCharacter(char)
             if not pHum or not player or pHum.Health <= 0 or player.Character ~= char then return end
-            if playerInventories[player] and playerInventories[player].Escaped then return end
+            if eliminatedPlayers[player] or (playerInventories[player] and playerInventories[player].Escaped) then return end
 
             local now = os.clock()
             local lastHit = playerLaserHitTimes[player]
@@ -347,6 +377,7 @@ local function SpawnGroundWeapon(spawnPos)
 
     prompt.Triggered:Connect(function(player)
         local backpack = player:FindFirstChild("Backpack")
+        if eliminatedPlayers[player] then return end
         if not backpack
             or backpack:FindFirstChild("Taser")
             or (player.Character and player.Character:FindFirstChild("Taser"))
@@ -380,7 +411,7 @@ end
 -- 7. ВЫСТРЕЛ ТАЙЗЕРА И ДЫМ
 -- ========================================================
 fireTaserEvent.OnServerEvent:Connect(function(player, targetPos)
-    if currentPhaseValue.Value ~= "LootPhase" or not isFiniteVector3(targetPos) then return end
+    if currentPhaseValue.Value ~= "LootPhase" or eliminatedPlayers[player] or not isFiniteVector3(targetPos) then return end
     if not canPerformAction(player, "FireTaser", 1.0) then return end
 
     local char = player.Character
@@ -413,7 +444,7 @@ fireTaserEvent.OnServerEvent:Connect(function(player, targetPos)
 end)
 
 throwSmokeEvent.OnServerEvent:Connect(function(player)
-    if currentPhaseValue.Value ~= "LootPhase" then return end
+    if currentPhaseValue.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
     if not canPerformAction(player, "ThrowSmoke", 10.0) then return end
 
     local char = player.Character
@@ -491,7 +522,7 @@ local function SpawnLootItem(lootData, spawnPosition)
         local currentLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
         local upg = playerUpgrades[player] or { Pockets = 0 }
         local effectiveMaxWeight = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, upg.Pockets)
-        if not inv or inv.Escaped then return end
+        if not inv or inv.Escaped or eliminatedPlayers[player] then return end
 
         if not LootLogic.CanAddItem(inv.TotalWeight, lootData.Weight, effectiveMaxWeight) then
             inventoryUpdatedEvent:FireClient(player, inv, "Рюкзак переполнен!")
@@ -517,7 +548,7 @@ end
 
 dropItemEvent.OnServerEvent:Connect(function(player, itemIndex)
     local inv = playerInventories[player]
-    if not inv or inv.Escaped then return end
+    if not inv or inv.Escaped or eliminatedPlayers[player] then return end
 
     -- RemoteEvent arguments are controlled by the client: accept only a valid array index.
     if typeof(itemIndex) ~= "number"
@@ -597,6 +628,8 @@ local function SavePlayerData(player)
     end
 
     local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
+    local raidsStat = leaderstats:FindFirstChild("Raids")
+    local streakStat = leaderstats:FindFirstChild("Streak")
     local ownedLoadouts = { Default = true }
     for _, loadout in ipairs(Config.Loadouts) do
         if loadout.Cost > 0 and playerOwnedLoadouts[player] and playerOwnedLoadouts[player][loadout.Id] == true then
@@ -604,8 +637,14 @@ local function SavePlayerData(player)
         end
     end
 
+    local normalizedStats = RaidProgression.NormalizeStats(
+        raidsStat and raidsStat.Value or 0,
+        streakStat and streakStat.Value or 0
+    )
     local dataToSave = {
         Cash = math.max(0, math.floor(cash.Value)),
+        Raids = normalizedStats.Raids,
+        Streak = normalizedStats.Streak,
         OwnedLoadouts = ownedLoadouts,
         Hideout = {
             Version = 1,
@@ -717,6 +756,16 @@ local function InitPlayer(player)
     cash.Value = 0
     cash.Parent = leaderstats
 
+    local raids = Instance.new("IntValue")
+    raids.Name = "Raids"
+    raids.Value = 0
+    raids.Parent = leaderstats
+
+    local streak = Instance.new("IntValue")
+    streak.Name = "Streak"
+    streak.Value = 0
+    streak.Parent = leaderstats
+
     playerUpgrades[player] = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
     playerOwnedLoadouts[player] = { Default = true }
     playerDataLoaded[player] = false
@@ -736,6 +785,10 @@ local function InitPlayer(player)
                 if type(savedData.Cash) == "number" and savedData.Cash == savedData.Cash then
                     cash.Value = math.clamp(math.floor(savedData.Cash), 0, 2000000000)
                 end
+
+                local normalizedStats = RaidProgression.NormalizeStats(savedData.Raids, savedData.Streak)
+                raids.Value = normalizedStats.Raids
+                streak.Value = normalizedStats.Streak
 
                 local savedOwnedLoadouts = savedData.OwnedLoadouts
                 if type(savedOwnedLoadouts) == "table" then
@@ -805,12 +858,14 @@ local function InitPlayer(player)
     end
 
     playerInventories[player] = { TotalValue = 0, TotalWeight = 0, Items = {}, Escaped = false }
+    eliminatedPlayers[player] = false
+    player:SetAttribute("Eliminated", false)
     ApplyLoadoutToPlayer(player, Config.Loadouts[1])
     SendOwnedLoadouts(player)
 
     player.CharacterAdded:Connect(function(char)
         task.wait(0.2)
-        if currentPhaseValue.Value == "LobbyPhase" then
+        if currentPhaseValue.Value == "LobbyPhase" or eliminatedPlayers[player] then
             char:PivotTo(GetHideoutSpawn(player))
         else
             char:PivotTo(CFrame.new(0, 3, -65))
@@ -818,35 +873,51 @@ local function InitPlayer(player)
 
         local hum = char:WaitForChild("Humanoid")
         local hrp = char:WaitForChild("HumanoidRootPart")
+        local activeLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
+        hum.WalkSpeed = activeLoadout.WalkSpeed
 
         hum.Died:Connect(function()
             local inv = playerInventories[player]
-            local isRaidActive = currentPhaseValue.Value == "LootPhase"
-                or currentPhaseValue.Value == "ExtractionPhase"
-            if not inv or inv.Escaped or not isRaidActive or #inv.Items == 0 then
-                return
-            end
+            local phase = currentPhaseValue.Value
+            local raidIsActive = RaidProgression.ShouldEliminate(phase)
 
-            -- Copy the server-owned inventory before clearing it.
-            local droppedItems = LootLogic.GetDeathDropItems(inv.Items)
-            local deathPosition = hrp.Position
-            for index, item in ipairs(droppedItems) do
-                local angle = (index / math.max(#droppedItems, 1)) * math.pi * 2
-                local offset = Vector3.new(math.cos(angle) * 3, 1.5, math.sin(angle) * 3)
-                SpawnLootItem(item, deathPosition + offset)
+            -- Elimination is independent from inventory contents and extraction state.
+            if raidIsActive then
+                eliminatedPlayers[player] = true
+                player:SetAttribute("Eliminated", true)
             end
-
-            local lostValue = inv.TotalValue
-            inv.Items = {}
-            inv.TotalWeight = 0
-            inv.TotalValue = 0
             extractingPlayers[player] = nil
 
-            inventoryUpdatedEvent:FireClient(
-                player,
-                inv,
-                string.format("Вы погибли! Потеряна вся добыча на сумму $%d.", lostValue)
-            )
+            if inv and RaidProgression.ShouldDropLoot(phase, inv.Escaped, #inv.Items) then
+                -- Copy the server-owned inventory before clearing it.
+                local droppedItems = LootLogic.GetDeathDropItems(inv.Items)
+                local deathPosition = hrp.Position
+                for index, item in ipairs(droppedItems) do
+                    local angle = (index / math.max(#droppedItems, 1)) * math.pi * 2
+                    local offset = Vector3.new(math.cos(angle) * 3, 1.5, math.sin(angle) * 3)
+                    SpawnLootItem(item, deathPosition + offset)
+                end
+
+                local lostValue = inv.TotalValue
+                inv.Items = {}
+                inv.TotalWeight = 0
+                inv.TotalValue = 0
+                inventoryUpdatedEvent:FireClient(
+                    player,
+                    inv,
+                    string.format("Вы выбыли из рейда! Потеряна добыча на сумму $%d.", lostValue)
+                )
+            elseif inv then
+                inventoryUpdatedEvent:FireClient(player, inv, "Вы выбыли из рейда.")
+            end
+
+            -- CharacterAutoLoads is disabled, so explicitly respawn after the death
+            -- animation. CharacterAdded routes eliminated players to their hideout.
+            task.delay(2, function()
+                if player.Parent == Players and player.Character == char then
+                    LoadCharacterForPlayer(player)
+                end
+            end)
         end)
 
         local fallY = 0
@@ -875,6 +946,9 @@ local function InitPlayer(player)
             end
         end)
     end)
+
+    -- With automatic respawning disabled, explicitly spawn the first character.
+    task.spawn(LoadCharacterForPlayer, player)
 end
 
 getRaidStatusFunction.OnServerInvoke = function(requestingPlayer)
@@ -945,13 +1019,14 @@ Players.PlayerRemoving:Connect(function(player)
     playerDataLoaded[player] = nil
     remoteActionTimes[player] = nil
     playerLaserHitTimes[player] = nil
+    eliminatedPlayers[player] = nil
     extractingPlayers[player] = nil
 end)
 
 for _, p in Players:GetPlayers() do InitPlayer(p) end
 
 makeNoiseEvent.OnServerEvent:Connect(function(player)
-    if currentPhaseValue.Value ~= "LootPhase" then return end
+    if currentPhaseValue.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
     if not canPerformAction(player, "MakeNoise", 0.75) then return end
 
     local char = player.Character
@@ -1101,7 +1176,10 @@ local function CreateGuardNPC(spawnPos)
             end
 
             local isAlerted = os.clock() < guardAlertUntil
-            local awareness = LootLogic.GetGuardAwareness(isAlerted)
+            local awareness = NightEvents.ApplyToAwareness(
+                LootLogic.GetGuardAwareness(isAlerted),
+                activeNightEvent
+            )
 
             local targetChar = nil
             for _, player in Players:GetPlayers() do
@@ -1110,6 +1188,7 @@ local function CreateGuardNPC(spawnPos)
                 local playerHumanoid = char and char:FindFirstChildOfClass("Humanoid")
 
                 if playerRoot and playerHumanoid and playerHumanoid.Health > 0
+                    and not eliminatedPlayers[player]
                     and not (playerInventories[player] and playerInventories[player].Escaped) then
                     local smokeBlocksVision = LootLogic.IsVisionBlockedBySmoke(
                         smokePositions, root.Position, playerRoot.Position, 14
@@ -1144,7 +1223,7 @@ local function CreateGuardNPC(spawnPos)
                 statusLabel.Text = "[ТРЕВОГА: ПОГОНЯ]"
                 statusLabel.TextColor3 = Color3.fromRGB(255, 30, 30)
                 light.Color = Color3.fromRGB(255, 0, 0)
-                humanoid.WalkSpeed = 20.5
+                humanoid.WalkSpeed = 20.5 * (activeNightEvent.GuardSpeedMultiplier or 1)
                 humanoid:MoveTo(targetChar.HumanoidRootPart.Position)
                 if (targetChar.HumanoidRootPart.Position - root.Position).Magnitude <= 5 then
                     local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
@@ -1260,6 +1339,39 @@ local function CreateExtractionZone()
     return zone
 end
 
+local function SetFacilityLampsEnabled(enabled: boolean)
+    local facility = workspace:FindFirstChild("HeistFacility")
+    if not facility then return end
+    for _, descendant in facility:GetDescendants() do
+        if descendant:IsA("PointLight") then
+            descendant.Enabled = enabled
+        end
+    end
+end
+
+local function ApplyNightEvent(event)
+    activeNightEvent = event
+    currentNightEventValue.Value = event.Name
+
+    if event.Darkness then
+        Lighting.Ambient = Color3.fromRGB(8, 9, 12)
+        Lighting.OutdoorAmbient = Color3.fromRGB(8, 9, 12)
+        Lighting.FogEnd = 110
+        SetFacilityLampsEnabled(false)
+    end
+
+    nightEventEvent:FireAllClients(event.Id, event.Name, event.Description)
+end
+
+local function ClearNightEvent()
+    activeNightEvent = NightEvents.None
+    currentNightEventValue.Value = ""
+    Lighting.Ambient = BASE_AMBIENT
+    Lighting.OutdoorAmbient = BASE_OUTDOOR_AMBIENT
+    Lighting.FogEnd = BASE_FOG_END
+    SetFacilityLampsEnabled(true)
+end
+
 local raidStartRequested = false
 
 startRaidEvent.OnServerEvent:Connect(function(player)
@@ -1283,22 +1395,32 @@ end)
 
 local function ResetPlayersForRound()
     for player, inv in playerInventories do
+        eliminatedPlayers[player] = false
+        player:SetAttribute("Eliminated", false)
         inv.TotalValue = 0
         inv.TotalWeight = 0
         inv.Items = {}
         inv.Escaped = false
         ApplyLoadoutToPlayer(player, playerActiveLoadouts[player] or Config.Loadouts[1])
         inventoryUpdatedEvent:FireClient(player, inv, "Новый рейд! Загляните к Скупщику в убежище.")
+
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then
+            task.spawn(LoadCharacterForPlayer, player)
+        end
     end
 end
 
 task.spawn(function()
     while true do
+        -- Switch to the lobby before respawning eliminated players so their
+        -- CharacterAdded handler sends them to their personal hideout.
+        currentPhaseValue.Value = "LobbyPhase"
+        raidStartRequested = false
         ResetPlayersForRound()
 
         -- Лобби: игроки готовятся в убежищах и запускают рейд кнопкой.
-        currentPhaseValue.Value = "LobbyPhase"
-        raidStartRequested = false
         for _, p in Players:GetPlayers() do
             if p.Character then p.Character:PivotTo(GetHideoutSpawn(p) * CFrame.new(math.random(-6, 6), 0, math.random(-6, 6))) end
         end
@@ -1316,9 +1438,15 @@ task.spawn(function()
         lootContainer:ClearAllChildren()
         weaponsContainer:ClearAllChildren()
 
+        local nightEvent = NightEvents.Pick(math.random())
         for _, pos in activeLootPositions do
-            local item = Config.LootTable[math.random(1, #Config.LootTable)]
+            local baseItem = Config.LootTable[math.random(1, #Config.LootTable)]
+            local item = NightEvents.ScaleLootValue(baseItem, nightEvent.LootValueMultiplier)
             SpawnLootItem(item, pos + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3)))
+        end
+
+        if nightEvent.JackpotLoot then
+            SpawnLootItem(nightEvent.JackpotLoot, Vector3.new(62, 1.5, -33))
         end
 
         SpawnGroundWeapon(Vector3.new(30, 13.5, -15))
@@ -1327,6 +1455,7 @@ task.spawn(function()
         SpawnLasers()
         CreateGuardNPC(Vector3.new(-15, 3, -15))
         stateChangedEvent:FireAllClients("LootPhase", Config.LootDuration)
+        ApplyNightEvent(nightEvent)
         task.wait(Config.LootDuration)
 
         -- Фаза Эвакуации
@@ -1353,7 +1482,8 @@ task.spawn(function()
                 local character = part:FindFirstAncestorOfClass("Model")
                 local pl = character and Players:GetPlayerFromCharacter(character)
                 local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-                if pl and character == pl.Character and humanoid and humanoid.Health > 0 then
+                if pl and character == pl.Character and humanoid and humanoid.Health > 0
+                    and not eliminatedPlayers[pl] then
                     inZone[pl] = true
                 end
             end
@@ -1372,10 +1502,27 @@ task.spawn(function()
 
                         local leaderstats = player:FindFirstChild("leaderstats")
                         local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-                        if cash then cash.Value += inv.TotalValue end
+                        local raidsStat = leaderstats and leaderstats:FindFirstChild("Raids")
+                        local streakStat = leaderstats and leaderstats:FindFirstChild("Streak")
+                        local previousStreak = streakStat and streakStat.Value or 0
+                        local payout = LootLogic.ApplyStreakBonus(inv.TotalValue, previousStreak)
+                        if cash then cash.Value += payout end
+                        local updatedRaids, updatedStreak = RaidProgression.ApplyOutcome(
+                            raidsStat and raidsStat.Value or 0,
+                            previousStreak,
+                            true
+                        )
+                        if raidsStat then raidsStat.Value = updatedRaids end
+                        if streakStat then streakStat.Value = updatedStreak end
                         SavePlayerData(player)
 
-                        raidSummaryEvent:FireClient(player, true, inv.TotalValue, #inv.Items, (cash and cash.Value) or 0)
+                        local bonusPercent = LootLogic.GetStreakBonusPercent(previousStreak)
+                        if bonusPercent > 0 then
+                            inventoryUpdatedEvent:FireClient(player, inv, string.format(
+                                "Серия рейдов: %d. Бонус +%d%% к выручке!", previousStreak, bonusPercent
+                            ))
+                        end
+                        raidSummaryEvent:FireClient(player, true, payout, #inv.Items, (cash and cash.Value) or 0)
                         if player.Character then player.Character:PivotTo(GetHideoutSpawn(player)) end
                     end
                 end
@@ -1393,11 +1540,23 @@ task.spawn(function()
             if not inv.Escaped then
                 local leaderstats = player:FindFirstChild("leaderstats")
                 local cash = leaderstats and leaderstats:FindFirstChild("Cash")
+                local streakStat = leaderstats and leaderstats:FindFirstChild("Streak")
+                if streakStat then
+                    local _, updatedStreak = RaidProgression.ApplyOutcome(
+                        leaderstats and leaderstats:FindFirstChild("Raids")
+                            and leaderstats.Raids.Value or 0,
+                        streakStat.Value,
+                        false
+                    )
+                    streakStat.Value = updatedStreak
+                    SavePlayerData(player)
+                end
                 raidSummaryEvent:FireClient(player, false, 0, 0, (cash and cash.Value) or 0)
             end
         end
 
         if zone then zone:Destroy() end
+        ClearNightEvent()
         local guard = workspace:FindFirstChild("GuardNPC")
         if guard then guard:Destroy() end
     end
