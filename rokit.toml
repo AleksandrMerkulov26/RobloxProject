@@ -1,0 +1,3 @@
+# CI-only toolchain for running standalone Luau unit tests.
+[tools]
+lune = "lune-org/lune@0.11.1"
