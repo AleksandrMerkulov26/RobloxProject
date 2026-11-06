@@ -26,8 +26,13 @@ function RaidProgression.ShouldDropLoot(phase: string, escaped: boolean, itemCou
     return raidIsActive and not escaped and itemCount > 0
 end
 
-function RaidProgression.ShouldRespawn(isDead: boolean, phase: string): boolean
-    return isDead and phase == "LobbyPhase"
+function RaidProgression.ShouldEliminate(phase: string): boolean
+    return phase == "LootPhase" or phase == "ExtractionPhase"
+end
+
+function RaidProgression.ShouldRespawn(isDead: boolean, _phase: string): boolean
+    -- Dead players respawn immediately; elimination controls where they appear.
+    return isDead
 end
 
 function RaidProgression.ApplyOutcome(raids: any, streak: any, escaped: boolean)
