@@ -64,10 +64,13 @@ expect("no loot drops in lobby", RaidProgression.ShouldDropLoot("LobbyPhase", fa
 expect("escaped player does not drop loot", RaidProgression.ShouldDropLoot("ExtractionPhase", true, 2), false)
 expect("empty inventory does not create a drop", RaidProgression.ShouldDropLoot("LootPhase", false, 0), false)
 
-expect("dead player waits during loot phase", RaidProgression.ShouldRespawn(true, "LootPhase"), false)
-expect("dead player waits during extraction phase", RaidProgression.ShouldRespawn(true, "ExtractionPhase"), false)
-expect("dead player can respawn in lobby", RaidProgression.ShouldRespawn(true, "LobbyPhase"), true)
-expect("living player is not respawned in lobby", RaidProgression.ShouldRespawn(false, "LobbyPhase"), false)
+expect("dead player respawns during loot phase", RaidProgression.ShouldRespawn(true, "LootPhase"), true)
+expect("dead player respawns during extraction phase", RaidProgression.ShouldRespawn(true, "ExtractionPhase"), true)
+expect("dead player respawns in lobby", RaidProgression.ShouldRespawn(true, "LobbyPhase"), true)
+expect("living player is not respawned", RaidProgression.ShouldRespawn(false, "LootPhase"), false)
+expect("death during loot phase eliminates player", RaidProgression.ShouldEliminate("LootPhase"), true)
+expect("death during extraction eliminates player", RaidProgression.ShouldEliminate("ExtractionPhase"), true)
+expect("death in lobby does not eliminate player", RaidProgression.ShouldEliminate("LobbyPhase"), false)
 
 -- Raid outcomes and streak boundaries.
 local raids, streak = RaidProgression.ApplyOutcome(10, 0, true)
