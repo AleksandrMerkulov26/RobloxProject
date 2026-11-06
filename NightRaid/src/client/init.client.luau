@@ -1096,65 +1096,82 @@ local function CreateNightEventUI()
     gui.ResetOnSpawn = false
     gui.Parent = playerGui
 
+    local TweenService = game:GetService("TweenService")
+
     local banner = Instance.new("Frame")
     banner.Name = "Banner"
-    banner.Size = UDim2.new(0, 430, 0, 94)
-    banner.Position = UDim2.new(0.5, -215, 0, 24)
+    banner.Size = UDim2.new(0, 390, 0, 82)
+    banner.Position = UDim2.new(0.5, -195, 0, -100)
     banner.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
-    banner.BackgroundTransparency = 0.12
+    banner.BackgroundTransparency = 0.08
     banner.Visible = false
     banner.Parent = gui
     Instance.new("UICorner", banner).CornerRadius = UDim.new(0, 10)
 
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -20, 0, 32)
+    title.Size = UDim2.new(1, -20, 0, 30)
     title.Position = UDim2.new(0, 10, 0, 7)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBlack
-    title.TextSize = 21
+    title.TextSize = 20
     title.TextColor3 = Color3.fromRGB(255, 200, 80)
     title.Text = ""
     title.Parent = banner
 
     local description = Instance.new("TextLabel")
-    description.Size = UDim2.new(1, -24, 0, 44)
-    description.Position = UDim2.new(0, 12, 0, 42)
+    description.Size = UDim2.new(1, -24, 0, 36)
+    description.Position = UDim2.new(0, 12, 0, 39)
     description.BackgroundTransparency = 1
     description.Font = Enum.Font.GothamMedium
-    description.TextSize = 13
+    description.TextSize = 12
     description.TextWrapped = true
     description.TextColor3 = Color3.fromRGB(235, 235, 235)
     description.Text = ""
     description.Parent = banner
 
     local generation = 0
-    local function refreshCurrentEvent()
-        local eventName = currentNightEventValue.Value
-        if eventName == "" then
-            banner.Visible = false
-        else
-            title.Text = eventName
-            banner.Visible = true
-        end
-    end
+    local visiblePosition = UDim2.new(0.5, -195, 0, 20)
+    local hiddenPosition = UDim2.new(0.5, -195, 0, -100)
 
-    currentNightEventValue.Changed:Connect(refreshCurrentEvent)
-    nightEventEvent.OnClientEvent:Connect(function(_eventId, eventName, eventDescription)
+    local function showEvent(eventName, eventDescription)
         if type(eventName) ~= "string" or eventName == "" then return end
         generation += 1
         local currentGeneration = generation
         title.Text = eventName
         description.Text = type(eventDescription) == "string" and eventDescription or ""
         banner.Visible = true
+        banner.Position = hiddenPosition
+        banner.BackgroundTransparency = 0.08
 
-        task.delay(7, function()
-            if currentGeneration == generation and currentNightEventValue.Value == "" then
+        TweenService:Create(
+            banner,
+            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { Position = visiblePosition }
+        ):Play()
+
+        task.delay(5, function()
+            if currentGeneration ~= generation then return end
+            local hideTween = TweenService:Create(
+                banner,
+                TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Position = hiddenPosition, BackgroundTransparency = 1 }
+            )
+            hideTween:Play()
+            hideTween.Completed:Wait()
+            if currentGeneration == generation then
                 banner.Visible = false
             end
         end)
+    end
+
+    nightEventEvent.OnClientEvent:Connect(function(_eventId, eventName, eventDescription)
+        showEvent(eventName, eventDescription)
     end)
 
-    refreshCurrentEvent()
+    -- The value may already be replicated if the UI was created after the event.
+    if currentNightEventValue.Value ~= "" then
+        showEvent(currentNightEventValue.Value, "")
+    end
 end
 
 task.spawn(CreateNightEventUI)
