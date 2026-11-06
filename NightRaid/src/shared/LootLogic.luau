@@ -132,21 +132,24 @@ LootLogic.UpgradesConfig = {
         BaseCost = 500,
         CostMultiplier = 1.8,
         MaxLevel = 3,
-        BonusPerLevel = 5
+        BonusPerLevel = 5,
+        Description = "Рюкзак: +%d кг за уровень"
     },
     SmokeStarter = {
         Name = "Пояс под снаряжение",
         BaseCost = 750,
         CostMultiplier = 2.0,
         MaxLevel = 2,
-        BonusPerLevel = 1
+        BonusPerLevel = 2,
+        Description = "Дымовая шашка: перезарядка -%d с за уровень"
     },
     Battery = {
         Name = "LED-аккумулятор",
         BaseCost = 300,
         CostMultiplier = 1.5,
         MaxLevel = 3,
-        BonusPerLevel = 15
+        BonusPerLevel = 15,
+        Description = "Фонарь: дальность +%d за уровень"
     }
 }
 
@@ -174,5 +177,34 @@ function LootLogic.GetEffectiveFlashlightRange(baseRange: number, batteryLevel: 
     local bonus = (batteryLevel or 0) * LootLogic.UpgradesConfig.Battery.BonusPerLevel
     return baseRange + bonus
 end
+
+-- Базовая перезарядка дыма (сек). Апгрейд SmokeStarter сокращает её на BonusPerLevel за уровень.
+LootLogic.SmokeBaseCooldown = 10
+
+function LootLogic.GetSmokeCooldown(starterLevel: number): number
+    local cfg = LootLogic.UpgradesConfig.SmokeStarter
+    local level = math.clamp(math.floor(starterLevel or 0), 0, cfg.MaxLevel)
+    return LootLogic.SmokeBaseCooldown - level * cfg.BonusPerLevel
+end
+
+-- ========================================================
+-- 4. СЕРИЯ УСПЕШНЫХ РЕЙДОВ
+-- ========================================================
+
+-- За каждый подряд успешный рейд выручка растёт на 10%, максимум +50%.
+-- Считаем в целых процентах, чтобы не получать ошибки округления дробных чисел.
+LootLogic.StreakBonusPercentPerRaid = 10
+LootLogic.MaxStreakBonusPercent = 50
+
+function LootLogic.GetStreakBonusPercent(streak: number): number
+    local count = math.max(0, math.floor(streak or 0))
+    return math.min(count * LootLogic.StreakBonusPercentPerRaid, LootLogic.MaxStreakBonusPercent)
+end
+
+function LootLogic.ApplyStreakBonus(baseValue: number, streak: number): number
+    local percent = LootLogic.GetStreakBonusPercent(streak)
+    return math.floor(baseValue * (100 + percent) / 100)
+end
+
 
 return LootLogic

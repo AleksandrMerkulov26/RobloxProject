@@ -1,8 +1,8 @@
 local Config = {
     -- Тайминги раундов
-    LobbyDuration = 0, -- Лобби ждёт ручного запуска рейда.
-    LootDuration = 30,
-    ExtractionDuration = 15,
+    LobbyDuration = 12,
+    LootDuration = 95,
+    ExtractionDuration = 45,
 
     -- Базовые параметры
     MaxInventoryWeight = 25,

@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
+local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
 
 local totalCount = 0
 local passCount = 0
@@ -179,6 +180,66 @@ local function RunSuite()
 
     local effLight = LootLogic.GetEffectiveFlashlightRange(75, 1)
     AssertTest("Дальность фонаря 75 + акб 1 ур (+15 studs) = 90 studs", effLight, 90)
+
+    -- ----------------------------------------------------
+    -- БЛОК 9: ПЕРЕЗАРЯДКА ДЫМА И АПГРЕЙД SmokeStarter
+    -- ----------------------------------------------------
+    print("\n-- [9. Перезарядка дыма] --")
+    AssertTest("Без апгрейда перезарядка дыма 10 сек", LootLogic.GetSmokeCooldown(0), 10)
+    AssertTest("Апгрейд 1 ур -> 8 сек", LootLogic.GetSmokeCooldown(1), 8)
+    AssertTest("Апгрейд 2 ур (макс) -> 6 сек", LootLogic.GetSmokeCooldown(2), 6)
+    AssertTest("Уровень выше максимума не ускоряет дальше (6 сек)", LootLogic.GetSmokeCooldown(9), 6)
+    AssertTest("Отрицательный уровень трактуется как 0 (10 сек)", LootLogic.GetSmokeCooldown(-3), 10)
+
+    -- ----------------------------------------------------
+    -- БЛОК 10: СЕРИЯ УСПЕШНЫХ РЕЙДОВ
+    -- ----------------------------------------------------
+    print("\n-- [10. Серия рейдов и бонус к выручке] --")
+    AssertTest("Серия 0 -> бонус 0%", LootLogic.GetStreakBonusPercent(0), 0)
+    AssertTest("Серия 1 -> бонус 10%", LootLogic.GetStreakBonusPercent(1), 10)
+    AssertTest("Серия 3 -> бонус 30%", LootLogic.GetStreakBonusPercent(3), 30)
+    AssertTest("Серия 5 -> бонус 50% (максимум)", LootLogic.GetStreakBonusPercent(5), 50)
+    AssertTest("Серия 9 -> бонус не выше 50%", LootLogic.GetStreakBonusPercent(9), 50)
+    AssertTest("Отрицательная серия -> бонус 0%", LootLogic.GetStreakBonusPercent(-2), 0)
+    AssertTest("Без серии выручка не меняется (1000)", LootLogic.ApplyStreakBonus(1000, 0), 1000)
+    AssertTest("Серия 3: 1000 -> 1300", LootLogic.ApplyStreakBonus(1000, 3), 1300)
+    AssertTest("Серия 1: 155 -> 170 (округление вниз)", LootLogic.ApplyStreakBonus(155, 1), 170)
+    AssertTest("Огромная серия: 1000 -> 1500 (кап +50%)", LootLogic.ApplyStreakBonus(1000, 99), 1500)
+
+    -- ----------------------------------------------------
+    -- БЛОК 11: НОЧНЫЕ СОБЫТИЯ
+    -- ----------------------------------------------------
+    print("\n-- [11. Ночные события] --")
+    -- Веса: Blackout 3, RedAlert 2, Jackpot 2, Calm 3 (всего 10).
+    AssertTest("roll 0.15 -> Чёрная ночь", NightEvents.Pick(0.15).Id, "Blackout")
+    AssertTest("roll 0.4 -> Красная тревога", NightEvents.Pick(0.4).Id, "RedAlert")
+    AssertTest("roll 0.6 -> Джекпот", NightEvents.Pick(0.6).Id, "Jackpot")
+    AssertTest("roll 0.9 -> Тихая ночь", NightEvents.Pick(0.9).Id, "Calm")
+    AssertTest("roll ниже 0 обрезается -> первое событие", NightEvents.Pick(-5).Id, "Blackout")
+    AssertTest("roll выше 1 обрезается -> последнее событие", NightEvents.Pick(5).Id, "Calm")
+
+    local allWeightsPositive = true
+    for _, event in ipairs(NightEvents.Events) do
+        if event.Weight <= 0 then allWeightsPositive = false end
+    end
+    AssertTest("У всех событий положительный вес", allWeightsPositive, true)
+    AssertTest("Джекпот содержит редкую добычу", NightEvents.Pick(0.6).JackpotLoot ~= nil, true)
+    AssertTest("У Чёрной ночи нет джекпот-добычи", NightEvents.Pick(0.15).JackpotLoot == nil, true)
+    AssertTest("Чёрная ночь включает затемнение", NightEvents.Pick(0.15).Darkness, true)
+
+    local baseLoot = { Name = "Тест", Value = 100, Weight = 2, Color = Color3.new(1, 1, 1), Fragile = true }
+    AssertTest("Множитель 1 возвращает тот же предмет", NightEvents.ScaleLootValue(baseLoot, 1) == baseLoot, true)
+    local scaledLoot = NightEvents.ScaleLootValue(baseLoot, 1.5)
+    AssertTest("Множитель 1.5: стоимость 100 -> 150", scaledLoot.Value, 150)
+    AssertTest("Масштабирование сохраняет вес и хрупкость", scaledLoot.Weight == 2 and scaledLoot.Fragile == true, true)
+    AssertTest("Исходный предмет не изменяется (100)", baseLoot.Value, 100)
+
+    local baseAwareness = { ViewDistance = 55, FovDotThreshold = 0.35, PatrolSpeed = 13.5, SearchSpeed = 16, InvestigateSpeed = 16 }
+    local changedAwareness = NightEvents.ApplyToAwareness(baseAwareness, { GuardViewMultiplier = 2, GuardSpeedMultiplier = 0.5 })
+    AssertTest("Зрение охранника x2 (55 -> 110)", changedAwareness.ViewDistance, 110)
+    AssertTest("Скорость патруля x0.5 (13.5 -> 6.75)", changedAwareness.PatrolSpeed, 6.75)
+    AssertTest("Угол обзора не меняется", changedAwareness.FovDotThreshold, 0.35)
+    AssertTest("Без события зрение не меняется (55)", NightEvents.ApplyToAwareness(baseAwareness, NightEvents.None).ViewDistance, 55)
 
     print("\n--------------------------------------------------------")
     if failCount == 0 then
