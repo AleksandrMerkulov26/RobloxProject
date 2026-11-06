@@ -54,6 +54,7 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
 local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
 local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
+local RaidProgression = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RaidProgression"))
 
 -- Настройки освещения склада
 Lighting.ClockTime = 0
@@ -629,10 +630,14 @@ local function SavePlayerData(player)
         end
     end
 
+    local normalizedStats = RaidProgression.NormalizeStats(
+        raidsStat and raidsStat.Value or 0,
+        streakStat and streakStat.Value or 0
+    )
     local dataToSave = {
         Cash = math.max(0, math.floor(cash.Value)),
-        Raids = math.clamp(math.floor(raidsStat and raidsStat.Value or 0), 0, MAX_STAT_VALUE),
-        Streak = math.clamp(math.floor(streakStat and streakStat.Value or 0), 0, MAX_STREAK),
+        Raids = normalizedStats.Raids,
+        Streak = normalizedStats.Streak,
         OwnedLoadouts = ownedLoadouts,
         Hideout = {
             Version = 1,
@@ -774,12 +779,9 @@ local function InitPlayer(player)
                     cash.Value = math.clamp(math.floor(savedData.Cash), 0, 2000000000)
                 end
 
-                if type(savedData.Raids) == "number" and savedData.Raids == savedData.Raids then
-                    raids.Value = math.clamp(math.floor(savedData.Raids), 0, MAX_STAT_VALUE)
-                end
-                if type(savedData.Streak) == "number" and savedData.Streak == savedData.Streak then
-                    streak.Value = math.clamp(math.floor(savedData.Streak), 0, MAX_STREAK)
-                end
+                local normalizedStats = RaidProgression.NormalizeStats(savedData.Raids, savedData.Streak)
+                raids.Value = normalizedStats.Raids
+                streak.Value = normalizedStats.Streak
 
                 local savedOwnedLoadouts = savedData.OwnedLoadouts
                 if type(savedOwnedLoadouts) == "table" then
@@ -867,9 +869,11 @@ local function InitPlayer(player)
 
         hum.Died:Connect(function()
             local inv = playerInventories[player]
-            local isRaidActive = currentPhaseValue.Value == "LootPhase"
-                or currentPhaseValue.Value == "ExtractionPhase"
-            if not inv or inv.Escaped or not isRaidActive or #inv.Items == 0 then
+            if not inv or not RaidProgression.ShouldDropLoot(
+                currentPhaseValue.Value,
+                inv.Escaped,
+                #inv.Items
+            ) then
                 return
             end
 
@@ -1377,7 +1381,10 @@ local function ResetPlayersForRound()
 
         local character = player.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then
+        if RaidProgression.ShouldRespawn(
+            not humanoid or humanoid.Health <= 0,
+            currentPhaseValue.Value
+        ) then
             -- Dead players return only when the next lobby begins.
             task.spawn(LoadCharacterForPlayer, player)
         end
@@ -1478,8 +1485,13 @@ task.spawn(function()
                         local previousStreak = streakStat and streakStat.Value or 0
                         local payout = LootLogic.ApplyStreakBonus(inv.TotalValue, previousStreak)
                         if cash then cash.Value += payout end
-                        if raidsStat then raidsStat.Value = math.min(raidsStat.Value + 1, MAX_STAT_VALUE) end
-                        if streakStat then streakStat.Value = math.min(streakStat.Value + 1, MAX_STREAK) end
+                        local updatedRaids, updatedStreak = RaidProgression.ApplyOutcome(
+                            raidsStat and raidsStat.Value or 0,
+                            previousStreak,
+                            true
+                        )
+                        if raidsStat then raidsStat.Value = updatedRaids end
+                        if streakStat then streakStat.Value = updatedStreak end
                         SavePlayerData(player)
 
                         local bonusPercent = LootLogic.GetStreakBonusPercent(previousStreak)
@@ -1508,7 +1520,13 @@ task.spawn(function()
                 local cash = leaderstats and leaderstats:FindFirstChild("Cash")
                 local streakStat = leaderstats and leaderstats:FindFirstChild("Streak")
                 if streakStat then
-                    streakStat.Value = 0
+                    local _, updatedStreak = RaidProgression.ApplyOutcome(
+                        leaderstats and leaderstats:FindFirstChild("Raids")
+                            and leaderstats.Raids.Value or 0,
+                        streakStat.Value,
+                        false
+                    )
+                    streakStat.Value = updatedStreak
                     SavePlayerData(player)
                 end
                 raidSummaryEvent:FireClient(player, false, 0, 0, (cash and cash.Value) or 0)
