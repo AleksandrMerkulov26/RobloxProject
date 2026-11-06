@@ -177,16 +177,15 @@ end
 
 local function isFiniteVector3(value)
     return typeof(value) == "Vector3"
-        and value.X == value.X and math.abs(value.X) < 100000
-        and value.Y == value.Y and math.abs(value.Y) < 100000        and value.Z == value.Z and math.abs(value.Z) < 100000
+        and value.X == value.X and math.abs(value.X) < 100000        and value.Y == value.Y and math.abs(value.Y) < 100000        and value.Z == value.Z and math.abs(value.Z) < 100000
 end
 
 -- ========================================================
 -- 4. ГЕНЕРАТОР КАРТЫ С УТОЛЩЕННЫМ ПОЛОМ И СКУПЩИКОМ
 -- ========================================================
 local function BuildFacility()
-    return MapBuilder.BuildFacility(nil, function(player)
-        currentSuspiciousNoise = { Position = Vector3.new(0, 0, 0), Radius = 120, Timestamp = os.clock() }
+    return MapBuilder.BuildFacility(nil, function(player, vaultPosition)
+        currentSuspiciousNoise = { Position = vaultPosition, Radius = 120, Timestamp = os.clock() }
         local inv = playerInventories[player]
         if inv then inventoryUpdatedEvent:FireClient(player, inv, "Сработала сирена сейфа!") end
     end)
@@ -357,8 +356,7 @@ end)
 -- ========================================================
 -- 8. ИНВЕНТАРЬ И ПОДБОР ЛУТА
 -- ========================================================
-local function SendOwnedLoadouts(player)
-    loadoutsUpdatedEvent:FireClient(player, playerOwnedLoadouts[player] or { Default = true })
+local function SendOwnedLoadouts(player)    loadoutsUpdatedEvent:FireClient(player, playerOwnedLoadouts[player] or { Default = true })
 end
 
 getOwnedLoadoutsFunction.OnServerInvoke = function(player)
@@ -537,7 +535,6 @@ local function SavePlayerData(player)
             Battery = math.clamp(math.floor(upg.Battery or 0), 0, 3),
         }
     }
-
     local success, err = pcall(function()
         PlayerDataStore:UpdateAsync("Player_" .. player.UserId, function()
             return dataToSave
@@ -717,8 +714,7 @@ local function InitPlayer(player)
         SpawnCFrame = spawnCFrame,
         Data = hideoutData,
     }
-    dealerPrompt.Triggered:Connect(function(triggeringPlayer)
-        if triggeringPlayer ~= player then return end
+    dealerPrompt.Triggered:Connect(function(triggeringPlayer)        if triggeringPlayer ~= player then return end
         local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
         upgradesUpdatedEvent:FireClient(player, upg, true)
     end)
@@ -897,8 +893,7 @@ Players.PlayerRemoving:Connect(function(player)
     playerUpgrades[player] = nil
     playerDataLoaded[player] = nil
     remoteActionTimes[player] = nil
-    playerLaserHitTimes[player] = nil
-    eliminatedPlayers[player] = nil
+    playerLaserHitTimes[player] = nil    eliminatedPlayers[player] = nil
     extractingPlayers[player] = nil
 end)
 
@@ -1077,8 +1072,7 @@ local function CreateGuardNPC(spawnPos, patrolWaypoints)
                         rayParams.FilterDescendantsInstances = { model, char, smokesContainer }
                         rayParams.FilterType = Enum.RaycastFilterType.Exclude
                         local hit = workspace:Raycast(root.Position, playerRoot.Position - root.Position, rayParams)
-                        if not hit then
-                            targetChar = char
+                        if not hit then                            targetChar = char
                             lastKnownPlayerPosition = playerRoot.Position
                             break
                         end
@@ -1258,7 +1252,6 @@ startRaidEvent.OnServerEvent:Connect(function(player)
         warn("[Raid] Start rejected: player is not inside their hideout")
         return
     end
-
     raidStartRequested = true
     print("[Raid] Start requested by", player.Name)
 end)
@@ -1298,6 +1291,10 @@ task.spawn(function()
         while not raidStartRequested do
             task.wait(0.2)
         end
+
+        -- Generate a fresh, seeded layout for every raid.
+        activeMap = BuildFacility()
+        activeLootPositions = activeMap.LootSpawnPoints
 
         -- Фаза Сбора Лута
         currentPhaseValue.Value = "LootPhase"
@@ -1437,8 +1434,7 @@ game:BindToClose(function()
     local playersToSave = Players:GetPlayers()
     local pendingSaves = #playersToSave
 
-    if pendingSaves == 0 then
-        return
+    if pendingSaves == 0 then        return
     end
 
     for _, player in playersToSave do
