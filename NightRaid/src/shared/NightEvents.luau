@@ -1,9 +1,14 @@
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
+
 -- Ночные события: случайный модификатор, меняющий условия каждого рейда.
--- Модуль не обращается к Workspace или Lighting: его функции легко тестировать.
 local NightEvents = {}
 
 NightEvents.None = {
     Id = "None",
+    NameKey = "",
+    DescKey = "",
     Name = "",
     Description = "",
     Weight = 0,
@@ -17,8 +22,10 @@ NightEvents.None = {
 NightEvents.Events = {
     {
         Id = "Blackout",
-        Name = "ЧЁРНАЯ НОЧЬ",
-        Description = "Свет отключён. Охранник видит хуже, но и вам сложнее ориентироваться. Добыча дороже на 25%.",
+        NameKey = "Event_Blackout_Name",
+        DescKey = "Event_Blackout_Desc",
+        Name = Locale.Get("Event_Blackout_Name"),
+        Description = Locale.Get("Event_Blackout_Desc"),
         Weight = 3,
         GuardViewMultiplier = 0.7,
         GuardSpeedMultiplier = 1,
@@ -27,8 +34,10 @@ NightEvents.Events = {
     },
     {
         Id = "RedAlert",
-        Name = "КРАСНАЯ ТРЕВОГА",
-        Description = "Охрана быстрее и зорче. Зато вся добыча стоит на 50% больше.",
+        NameKey = "Event_RedAlert_Name",
+        DescKey = "Event_RedAlert_Desc",
+        Name = Locale.Get("Event_RedAlert_Name"),
+        Description = Locale.Get("Event_RedAlert_Desc"),
         Weight = 2,
         GuardViewMultiplier = 1.2,
         GuardSpeedMultiplier = 1.1,
@@ -37,15 +46,19 @@ NightEvents.Events = {
     },
     {
         Id = "Jackpot",
-        Name = "ДЖЕКПОТ",
-        Description = "В запертом хранилище спрятана Золотая корона. Вскройте дверь и успейте её вынести!",
+        NameKey = "Event_Jackpot_Name",
+        DescKey = "Event_Jackpot_Desc",
+        Name = Locale.Get("Event_Jackpot_Name"),
+        Description = Locale.Get("Event_Jackpot_Desc"),
         Weight = 2,
         GuardViewMultiplier = 1,
         GuardSpeedMultiplier = 1,
         LootValueMultiplier = 1,
         Darkness = false,
         JackpotLoot = {
-            Name = "Золотая корона",
+            Id = "Crown",
+            NameKey = "Loot_Crown",
+            Name = Locale.Get("Loot_Crown"),
             Value = 2500,
             Weight = 10,
             Color = Color3.fromRGB(255, 200, 40),
@@ -54,13 +67,41 @@ NightEvents.Events = {
     },
     {
         Id = "Calm",
-        Name = "ТИХАЯ НОЧЬ",
-        Description = "Всё спокойно. Обычный рейд — идеальная возможность освоиться.",
+        NameKey = "Event_Calm_Name",
+        DescKey = "Event_Calm_Desc",
+        Name = Locale.Get("Event_Calm_Name"),
+        Description = Locale.Get("Event_Calm_Desc"),
         Weight = 3,
         GuardViewMultiplier = 1,
         GuardSpeedMultiplier = 1,
         LootValueMultiplier = 1,
         Darkness = false,
+    },
+    {
+        Id = "PowerSurge",
+        NameKey = "Event_PowerSurge_Name",
+        DescKey = "Event_PowerSurge_Desc",
+        Name = Locale.Get("Event_PowerSurge_Name"),
+        Description = Locale.Get("Event_PowerSurge_Desc"),
+        Weight = 2,
+        GuardViewMultiplier = 1.1,
+        GuardSpeedMultiplier = 1.3,
+        LootValueMultiplier = 1.3,
+        Darkness = false,
+        LasersDisabled = true,
+    },
+    {
+        Id = "ThickFog",
+        NameKey = "Event_ThickFog_Name",
+        DescKey = "Event_ThickFog_Desc",
+        Name = Locale.Get("Event_ThickFog_Name"),
+        Description = Locale.Get("Event_ThickFog_Desc"),
+        Weight = 2,
+        GuardViewMultiplier = 0.5,
+        GuardSpeedMultiplier = 0.95,
+        LootValueMultiplier = 1.2,
+        Darkness = false,
+        HeavyFog = true,
     },
 }
 
@@ -82,12 +123,14 @@ function NightEvents.Pick(roll: number)
     return NightEvents.Events[#NightEvents.Events]
 end
 
-function NightEvents.ScaleLootValue(lootData, multiplier: number)
+function NightEvents.ScaleLootValue(lootData: any, multiplier: number)
     if multiplier == 1 then
         return lootData
     end
 
     return {
+        Id = lootData.Id,
+        NameKey = lootData.NameKey,
         Name = lootData.Name,
         Value = math.floor(lootData.Value * multiplier + 0.5),
         Weight = lootData.Weight,
@@ -96,7 +139,7 @@ function NightEvents.ScaleLootValue(lootData, multiplier: number)
     }
 end
 
-function NightEvents.ApplyToAwareness(awareness, event)
+function NightEvents.ApplyToAwareness(awareness: any, event: any)
     local viewMultiplier = event.GuardViewMultiplier or 1
     local speedMultiplier = event.GuardSpeedMultiplier or 1
 

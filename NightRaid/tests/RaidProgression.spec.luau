@@ -12,6 +12,7 @@ Color3 = {
 local RaidProgression = require("../src/shared/RaidProgression")
 local LootLogic = require("../src/shared/LootLogic")
 local NightEvents = require("../src/shared/NightEvents")
+local MapConfigs = require("../src/shared/MapConfigs")
 
 local total = 0
 local failures = {}
@@ -101,11 +102,15 @@ expect("payout applies prior streak bonus", LootLogic.ApplyStreakBonus(1000, 3),
 expect("payout rounds down", LootLogic.ApplyStreakBonus(155, 1), 170)
 
 -- Weighted night-event selection and event modifiers.
+expect("edge roll 0.0 picks first event (Blackout)", NightEvents.Pick(0.0).Id, "Blackout")
 expect("Blackout is selected at low roll", NightEvents.Pick(0.1).Id, "Blackout")
 expect("Red Alert is selected at middle roll", NightEvents.Pick(0.4).Id, "RedAlert")
 expect("Jackpot is selected at jackpot roll", NightEvents.Pick(0.6).Id, "Jackpot")
 expect("Calm is selected at high roll", NightEvents.Pick(0.9).Id, "Calm")
-expect("Jackpot contains golden crown", NightEvents.Pick(0.6).JackpotLoot.Name, "Золотая корона")
+expect("edge roll 0.999999 picks last event (Calm)", NightEvents.Pick(0.999999).Id, "Calm")
+expect("negative roll is clamped to Blackout", NightEvents.Pick(-1.0).Id, "Blackout")
+expect("roll exceeding 1.0 is clamped to Calm", NightEvents.Pick(2.5).Id, "Calm")
+expect("Jackpot contains golden crown id", NightEvents.Pick(0.6).JackpotLoot.Id, "Crown")
 expect("Blackout enables darkness", NightEvents.Pick(0.1).Darkness, true)
 expect("Calm does not enable darkness", NightEvents.Pick(0.9).Darkness, false)
 
@@ -131,6 +136,53 @@ expect("scaling does not mutate source loot", loot.Value, 100)
 -- Inventory boundary checks used by the existing gameplay code.
 expect("item fits exactly into inventory", LootLogic.CanAddItem(20, 5, 25), true)
 expect("item exceeding inventory is rejected", LootLogic.CanAddItem(24, 2, 25), false)
+
+-- Walk speed curve based on inventory weight ratio.
+expect("empty inventory gives base walk speed", LootLogic.CalculateWalkSpeed(0, 20, 16, 8), 16)
+expect("half-filled backpack gives half speed penalty", LootLogic.CalculateWalkSpeed(10, 20, 16, 8), 12)
+expect("full backpack gives minimum walk speed", LootLogic.CalculateWalkSpeed(20, 20, 16, 8), 8)
+expect("overfilled backpack does not drop below minimum speed", LootLogic.CalculateWalkSpeed(30, 20, 16, 8), 8)
+
+-- Fall damage and fragile items breaking.
+local testPack = {
+    { Name = "Watch", Weight = 1.5, Value = 150, Fragile = false },
+    { Name = "Vase", Weight = 4.0, Value = 550, Fragile = true },
+    { Name = "Ingot", Weight = 8.0, Value = 450, Fragile = false },
+}
+local safeRem, safeBroken = LootLogic.ProcessFallDamage(testPack, 10, 14)
+expect("safe fall does not break fragile loot", #safeBroken, 0)
+expect("safe fall retains all items", #safeRem, 3)
+
+local hardRem, hardBroken, newW, newV = LootLogic.ProcessFallDamage(testPack, 18, 14)
+expect("fall above threshold breaks fragile item", #hardBroken, 1)
+expect("non-fragile items are retained", #hardRem, 2)
+expect("weight is recalculated after break", newW, 9.5)
+expect("value is recalculated after break", newV, 600)
+
+-- Upgrade costs and purchases.
+expect("base upgrade cost at level 0", LootLogic.GetUpgradeCost("Pockets", 0), 500)
+expect("upgrade cost at max level is nil", LootLogic.GetUpgradeCost("Pockets", 3), nil)
+
+local canBuy, newCash, newLvl = LootLogic.CanPurchaseUpgrade(1000, "Pockets", 0)
+expect("can purchase upgrade with sufficient funds", canBuy, true)
+expect("cash deducted accurately", newCash, 500)
+expect("level incremented by 1", newLvl, 1)
+
+local failBuy, unchCash = LootLogic.CanPurchaseUpgrade(200, "Pockets", 0)
+expect("cannot purchase upgrade with insufficient funds", failBuy, false)
+expect("cash left untouched upon rejection", unchCash, 200)
+
+expect("effective max weight includes upgrade bonus", LootLogic.GetEffectiveMaxWeight(25, 2), 35)
+expect("effective flashlight range includes battery bonus", LootLogic.GetEffectiveFlashlightRange(75, 1), 90)
+
+-- Phase 1: Data-driven maps checks
+local maps = MapConfigs.GetMapList()
+expect("three maps configured in data-driven system", #maps, 3)
+expect("warehouse map exists", MapConfigs.Get("Warehouse").Id, "Warehouse")
+expect("archive vault map exists", MapConfigs.Get("Archive").Id, "Archive")
+expect("cargo docks map exists", MapConfigs.Get("Docks").Id, "Docks")
+expect("archive map has keycard spawns", #MapConfigs.Get("Archive").KeycardSpawns > 0, true)
+expect("cargo docks has vertical crane beams", #MapConfigs.Get("Docks").Beams > 0, true)
 
 print(string.format("Gameplay unit tests: %d checks, %d failures.", total, #failures))
 if #failures > 0 then

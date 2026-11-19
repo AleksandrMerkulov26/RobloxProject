@@ -76,6 +76,18 @@ local function RunSuite()
     AssertTest("Вес пересчитан без вазы (1.5 + 8.0 = 9.5 кг)", newW, 9.5)
     AssertTest("Стоимость пересчитана без вазы (150 + 450 = 600)", newV, 600)
 
+    -- Несколько хрупких предметов
+    local multiFragilePack = {
+        { Name = "Ваза 1", Weight = 3.0, Value = 400, Fragile = true },
+        { Name = "Часы", Weight = 1.0, Value = 100, Fragile = false },
+        { Name = "Ваза 2", Weight = 2.0, Value = 300, Fragile = true }
+    }
+    local multiRem, multiBroken, multiW, multiV = LootLogic.ProcessFallDamage(multiFragilePack, 20, 14)
+    AssertTest("Падение разбивает все хрупкие предметы (2 шт)", #multiBroken, 2)
+    AssertTest("Сохраняется только нехрупкий предмет (1 шт)", #multiRem, 1)
+    AssertTest("Итоговый вес равен весу часов (1.0 кг)", multiW, 1.0)
+    AssertTest("Итоговая стоимость равна стоимости часов ($100)", multiV, 100)
+
     -- ----------------------------------------------------
     -- БЛОК 5: ЗРЕНИЕ ИИ ОХРАННИКА
     -- ----------------------------------------------------
@@ -199,10 +211,14 @@ local function RunSuite()
     -- БЛОК 11: НОЧНЫЕ СОБЫТИЯ
     -- ----------------------------------------------------
     print("\n-- [11. Ночные события] --")
+    AssertTest("roll 0.0 (минимальная граница) выбирает первое событие (Blackout)", NightEvents.Pick(0.0).Id, "Blackout")
     AssertTest("roll 0.15 выбирает Чёрную ночь", NightEvents.Pick(0.15).Id, "Blackout")
     AssertTest("roll 0.4 выбирает Красную тревогу", NightEvents.Pick(0.4).Id, "RedAlert")
     AssertTest("roll 0.6 выбирает Джекпот", NightEvents.Pick(0.6).Id, "Jackpot")
     AssertTest("roll 0.9 выбирает Тихую ночь", NightEvents.Pick(0.9).Id, "Calm")
+    AssertTest("roll 0.999999 (максимальная граница) выбирает последнее событие (Calm)", NightEvents.Pick(0.999999).Id, "Calm")
+    AssertTest("roll отрицательный (-0.5) защищен clamp и выбирает Blackout", NightEvents.Pick(-0.5).Id, "Blackout")
+    AssertTest("roll выше 1.0 (1.5) защищен clamp и выбирает Calm", NightEvents.Pick(1.5).Id, "Calm")
     AssertTest("У всех событий положительный вес", (function()
         for _, event in ipairs(NightEvents.Events) do
             if event.Weight <= 0 then return false end
@@ -219,7 +235,7 @@ local function RunSuite()
     AssertTest("Чёрная ночь уменьшает обзор охранника", blackoutAwareness.ViewDistance, 38.5)
     local alertAwareness = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.4))
     AssertTest("Красная тревога увеличивает обзор охранника", alertAwareness.ViewDistance, 66)
-    AssertTest("Джекпот содержит корону", NightEvents.Pick(0.6).JackpotLoot.Name, "Золотая корона")
+    AssertTest("Джекпот содержит корону (проверка по Id)", NightEvents.Pick(0.6).JackpotLoot.Id, "Crown")
 
     print("\n--------------------------------------------------------")
     if failCount == 0 then

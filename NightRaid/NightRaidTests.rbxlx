@@ -1,0 +1,726 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="2">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source">local Config = {
+    -- Тайминги раундов
+    LobbyDuration = 0, -- Лобби ждёт ручного запуска рейда.
+    LootDuration = 30,
+    ExtractionDuration = 15,
+
+    -- Базовые параметры
+    MaxInventoryWeight = 25,
+    BaseWalkSpeed = 16,
+    MinWalkSpeed = 8,
+    GrappleDistance = 150,
+    GrapplePullSpeed = 95,
+
+    -- Доступные автосеты
+    Loadouts = {
+        {
+            Id = "Default",
+            Name = "Новобранец",
+            Cost = 0,
+            WalkSpeed = 16,
+            MaxWeight = 25,
+            GrappleDistance = 150,
+            GrappleSpeed = 95,
+            Description = "Базовый сбалансированный комплект налётчика."
+        },
+        {
+            Id = "Scout",
+            Name = "Разведчик",
+            Cost = 1,
+            WalkSpeed = 20,
+            MaxWeight = 16,
+            GrappleDistance = 210,
+            GrappleSpeed = 120,
+            Description = "Высокая скорость и дальнобойная кошка, но малый рюкзак."
+        },
+        {
+            Id = "Mule",
+            Name = "Тяжеловес",
+            Cost = 3,
+            WalkSpeed = 14,
+            MaxWeight = 50,
+            GrappleDistance = 130,
+            GrappleSpeed = 85,
+            Description = "Огромный рюкзак под ценности и драгоценные слитки."
+        }
+    },
+
+    -- Категории лута (хрупкие, тяжелые и обычные)
+    LootTable = {
+        { Name = "Золотые часы", Value = 150, Weight = 1.5, Color = Color3.fromRGB(255, 215, 0), Fragile = false },
+        { Name = "Элитная микросхема", Value = 300, Weight = 2.0, Color = Color3.fromRGB(0, 180, 255), Fragile = false },
+        { Name = "Хрупкая античная ваза", Value = 550, Weight = 4.0, Color = Color3.fromRGB(255, 120, 180), Fragile = true },
+        { Name = "Слиток платины", Value = 450, Weight = 8.0, Color = Color3.fromRGB(220, 220, 230), Fragile = false },
+        { Name = "Мини-сейф с облигациями", Value = 900, Weight = 14.0, Color = Color3.fromRGB(50, 50, 50), Fragile = false },
+    }
+}
+
+return Config</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">LootLogic</string>
+          <string name="Source">local LootLogic = {}
+
+-- ========================================================
+-- 1. ИНВЕНТАРЬ И СКОРОСТЬ
+-- ========================================================
+
+function LootLogic.CanAddItem(currentWeight: number, itemWeight: number, maxWeight: number): boolean
+    return (currentWeight + itemWeight) &lt;= maxWeight
+end
+
+function LootLogic.CalculateWalkSpeed(currentWeight: number, maxWeight: number, baseSpeed: number, minSpeed: number): number
+    if maxWeight &lt;= 0 then return minSpeed end
+    local ratio = math.clamp(currentWeight / maxWeight, 0, 1)
+    return math.clamp(baseSpeed - (ratio * (baseSpeed - minSpeed)), minSpeed, baseSpeed)
+end
+
+function LootLogic.CanAffordLoadout(playerCash: number, loadoutCost: number): (boolean, number)
+    if playerCash &gt;= loadoutCost then
+        return true, playerCash - loadoutCost
+    end
+    return false, playerCash
+end
+
+function LootLogic.ProcessFallDamage(itemsTable, fallDistance: number, breakThreshold: number)
+    local remaining = {}
+    local broken = {}
+    local totalWeight = 0
+    local totalValue = 0
+
+    for _, item in ipairs(itemsTable) do
+        if item.Fragile and fallDistance &gt; breakThreshold then
+            table.insert(broken, item)
+        else
+            table.insert(remaining, item)
+            totalWeight += item.Weight
+            totalValue += item.Value
+        end
+    end
+
+    return remaining, broken, totalWeight, totalValue
+end
+
+-- ========================================================
+-- 2. СТЕЛС И ИИ ОХРАНЫ
+-- ========================================================
+
+function LootLogic.IsPlayerDetected(guardPos: Vector3, guardLookVector: Vector3, playerPos: Vector3, maxViewDist: number, fovDotThreshold: number, rearSenseDist: number): boolean
+    local offset = playerPos - guardPos
+    local dist = offset.Magnitude
+
+    if dist &gt; maxViewDist then
+        return false
+    end
+
+    if dist &lt;= rearSenseDist then
+        return true
+    end
+
+    local dirToPlayer = offset.Unit
+    local dot = guardLookVector:Dot(dirToPlayer)
+
+    return dot &gt;= fovDotThreshold
+end
+
+function LootLogic.GetDeathDropItems(items)
+    local droppedItems = {}
+    for _, item in ipairs(items) do
+        table.insert(droppedItems, item)
+    end
+    return droppedItems
+end
+
+function LootLogic.IsNoiseAudible(guardPos: Vector3, noisePos: Vector3, noiseRadius: number): boolean
+    return (guardPos - noisePos).Magnitude &lt;= noiseRadius
+end
+
+-- Alert mode improves awareness and movement for a short time after a sighting or loud noise.
+function LootLogic.GetGuardAwareness(isAlerted: boolean)
+    if isAlerted then
+        return {
+            ViewDistance = 70,
+            FovDotThreshold = 0.2,
+            PatrolSpeed = 16,
+            SearchSpeed = 18,
+            InvestigateSpeed = 18
+        }
+    end
+
+    return {
+        ViewDistance = 55,
+        FovDotThreshold = 0.35,
+        PatrolSpeed = 13.5,
+        SearchSpeed = 16,
+        InvestigateSpeed = 16
+    }
+end
+
+function LootLogic.IsVisionBlockedBySmoke(smokePositions, guardPos: Vector3, playerPos: Vector3, smokeRadius: number): boolean
+    local rayDir = playerPos - guardPos
+    local rayLen = rayDir.Magnitude
+    if rayLen == 0 then return false end
+    local rayUnit = rayDir.Unit
+
+    for _, sPos in ipairs(smokePositions) do
+        if (guardPos - sPos).Magnitude &lt;= smokeRadius or (playerPos - sPos).Magnitude &lt;= smokeRadius then
+            return true
+        end
+
+        local toSmoke = sPos - guardPos
+        local projection = toSmoke:Dot(rayUnit)
+        if projection &gt; 0 and projection &lt; rayLen then
+            local closestPoint = guardPos + rayUnit * projection
+            if (sPos - closestPoint).Magnitude &lt;= smokeRadius then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function LootLogic.CanTaserHit(shooterPos: Vector3, targetPos: Vector3, maxRange: number): boolean
+    return (targetPos - shooterPos).Magnitude &lt;= maxRange
+end
+
+-- ========================================================
+-- 3. ЭКОНОМИКА УБЕЖИЩА И АПГРЕЙДЫ
+-- ========================================================
+
+LootLogic.UpgradesConfig = {
+    Pockets = {
+        Name = "Грузовые ремни",
+        BaseCost = 500,
+        CostMultiplier = 1.8,
+        MaxLevel = 3,
+        BonusPerLevel = 5
+    },
+    SmokeStarter = {
+        Name = "Пояс под снаряжение",
+        BaseCost = 750,
+        CostMultiplier = 2.0,
+        MaxLevel = 2,
+        BonusPerLevel = 1
+    },
+    Battery = {
+        Name = "LED-аккумулятор",
+        BaseCost = 300,
+        CostMultiplier = 1.5,
+        MaxLevel = 3,
+        BonusPerLevel = 15
+    }
+}
+
+function LootLogic.GetUpgradeCost(upgradeKey: string, currentLevel: number): number?
+    local cfg = LootLogic.UpgradesConfig[upgradeKey]
+    if not cfg or currentLevel &gt;= cfg.MaxLevel then return nil end
+    return math.floor(cfg.BaseCost * (cfg.CostMultiplier ^ currentLevel))
+end
+
+function LootLogic.CanPurchaseUpgrade(playerCash: number, upgradeKey: string, currentLevel: number): (boolean, number, number)
+    local cost = LootLogic.GetUpgradeCost(upgradeKey, currentLevel)
+    if not cost then return false, playerCash, currentLevel end
+    if playerCash &gt;= cost then
+        return true, playerCash - cost, currentLevel + 1
+    end
+    return false, playerCash, currentLevel
+end
+
+function LootLogic.GetEffectiveMaxWeight(baseMaxWeight: number, pocketsLevel: number): number
+    local bonus = (pocketsLevel or 0) * LootLogic.UpgradesConfig.Pockets.BonusPerLevel
+    return baseMaxWeight + bonus
+end
+
+function LootLogic.GetEffectiveFlashlightRange(baseRange: number, batteryLevel: number): number
+    local bonus = (batteryLevel or 0) * LootLogic.UpgradesConfig.Battery.BonusPerLevel
+    return baseRange + bonus
+end
+
+-- Бонус за серию успешных эвакуаций: +10% за каждую, максимум +50%.
+LootLogic.StreakBonusPercentPerRaid = 10
+LootLogic.MaxStreakBonusPercent = 50
+
+function LootLogic.GetStreakBonusPercent(streak: number): number
+    local count = math.max(0, math.floor(streak or 0))
+    return math.min(count * LootLogic.StreakBonusPercentPerRaid, LootLogic.MaxStreakBonusPercent)
+end
+
+function LootLogic.ApplyStreakBonus(baseValue: number, streak: number): number
+    local percent = LootLogic.GetStreakBonusPercent(streak)
+    return math.floor(baseValue * (100 + percent) / 100)
+end
+
+return LootLogic</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">NightEvents</string>
+          <string name="Source"><![CDATA[-- Ночные события: случайный модификатор, меняющий условия каждого рейда.
+-- Модуль не обращается к Workspace или Lighting: его функции легко тестировать.
+local NightEvents = {}
+
+NightEvents.None = {
+    Id = "None",
+    Name = "",
+    Description = "",
+    Weight = 0,
+    GuardViewMultiplier = 1,
+    GuardSpeedMultiplier = 1,
+    LootValueMultiplier = 1,
+    Darkness = false,
+    JackpotLoot = nil,
+}
+
+NightEvents.Events = {
+    {
+        Id = "Blackout",
+        Name = "ЧЁРНАЯ НОЧЬ",
+        Description = "Свет отключён. Охранник видит хуже, но и вам сложнее ориентироваться. Добыча дороже на 25%.",
+        Weight = 3,
+        GuardViewMultiplier = 0.7,
+        GuardSpeedMultiplier = 1,
+        LootValueMultiplier = 1.25,
+        Darkness = true,
+    },
+    {
+        Id = "RedAlert",
+        Name = "КРАСНАЯ ТРЕВОГА",
+        Description = "Охрана быстрее и зорче. Зато вся добыча стоит на 50% больше.",
+        Weight = 2,
+        GuardViewMultiplier = 1.2,
+        GuardSpeedMultiplier = 1.1,
+        LootValueMultiplier = 1.5,
+        Darkness = false,
+    },
+    {
+        Id = "Jackpot",
+        Name = "ДЖЕКПОТ",
+        Description = "В запертом хранилище спрятана Золотая корона. Вскройте дверь и успейте её вынести!",
+        Weight = 2,
+        GuardViewMultiplier = 1,
+        GuardSpeedMultiplier = 1,
+        LootValueMultiplier = 1,
+        Darkness = false,
+        JackpotLoot = {
+            Name = "Золотая корона",
+            Value = 2500,
+            Weight = 10,
+            Color = Color3.fromRGB(255, 200, 40),
+            Fragile = false,
+        },
+    },
+    {
+        Id = "Calm",
+        Name = "ТИХАЯ НОЧЬ",
+        Description = "Всё спокойно. Обычный рейд — идеальная возможность освоиться.",
+        Weight = 3,
+        GuardViewMultiplier = 1,
+        GuardSpeedMultiplier = 1,
+        LootValueMultiplier = 1,
+        Darkness = false,
+    },
+}
+
+function NightEvents.Pick(roll: number)
+    local totalWeight = 0
+    for _, event in ipairs(NightEvents.Events) do
+        totalWeight += event.Weight
+    end
+
+    local target = math.clamp(roll, 0, 0.999999) * totalWeight
+    local accumulated = 0
+    for _, event in ipairs(NightEvents.Events) do
+        accumulated += event.Weight
+        if target < accumulated then
+            return event
+        end
+    end
+
+    return NightEvents.Events[#NightEvents.Events]
+end
+
+function NightEvents.ScaleLootValue(lootData, multiplier: number)
+    if multiplier == 1 then
+        return lootData
+    end
+
+    return {
+        Name = lootData.Name,
+        Value = math.floor(lootData.Value * multiplier + 0.5),
+        Weight = lootData.Weight,
+        Color = lootData.Color,
+        Fragile = lootData.Fragile,
+    }
+end
+
+function NightEvents.ApplyToAwareness(awareness, event)
+    local viewMultiplier = event.GuardViewMultiplier or 1
+    local speedMultiplier = event.GuardSpeedMultiplier or 1
+
+    return {
+        ViewDistance = awareness.ViewDistance * viewMultiplier,
+        FovDotThreshold = awareness.FovDotThreshold,
+        PatrolSpeed = awareness.PatrolSpeed * speedMultiplier,
+        SearchSpeed = awareness.SearchSpeed * speedMultiplier,
+        InvestigateSpeed = awareness.InvestigateSpeed * speedMultiplier,
+    }
+end
+
+return NightEvents
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="5">
+        <Properties>
+          <string name="Name">RaidProgression</string>
+          <string name="Source"><![CDATA[-- Pure raid progression rules shared by the server and deterministic tests.
+-- Keeping these decisions outside the server loop makes them testable without
+-- simulating the full Roblox game world.
+local RaidProgression = {}
+
+RaidProgression.MaxRaidCount = 2000000000
+RaidProgression.MaxStreak = 5
+
+local function toSafeInteger(value: any, fallback: number): number
+    if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then
+        return fallback
+    end
+
+    return math.floor(value)
+end
+
+function RaidProgression.NormalizeStats(raids: any, streak: any)
+    return {
+        Raids = math.clamp(toSafeInteger(raids, 0), 0, RaidProgression.MaxRaidCount),
+        Streak = math.clamp(toSafeInteger(streak, 0), 0, RaidProgression.MaxStreak),
+    }
+end
+
+function RaidProgression.ShouldDropLoot(phase: string, escaped: boolean, itemCount: number): boolean
+    local raidIsActive = phase == "LootPhase" or phase == "ExtractionPhase"
+    return raidIsActive and not escaped and itemCount > 0
+end
+
+function RaidProgression.ShouldRespawn(isDead: boolean, phase: string): boolean
+    return isDead and phase == "LobbyPhase"
+end
+
+function RaidProgression.ApplyOutcome(raids: any, streak: any, escaped: boolean)
+    local stats = RaidProgression.NormalizeStats(raids, streak)
+
+    if not escaped then
+        stats.Streak = 0
+        return stats.Raids, stats.Streak
+    end
+
+    stats.Raids = math.min(stats.Raids + 1, RaidProgression.MaxRaidCount)
+    stats.Streak = math.min(stats.Streak + 1, RaidProgression.MaxStreak)
+    return stats.Raids, stats.Streak
+end
+
+return RaidProgression
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="6">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="7">
+      <Properties>
+        <string name="Name">TestRunner</string>
+      </Properties>
+      <Item class="Script" referent="8">
+        <Properties>
+          <string name="Name">RaidProgressionTests</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[-- Studio-side smoke tests for the pure raid progression rules.
+-- These run inside Roblox Studio's server test place, not in headless CI.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RaidProgression = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RaidProgression"))
+
+local checks = {
+    { "dead player waits during raid", RaidProgression.ShouldRespawn(true, "LootPhase"), false },
+    { "dead player waits during extraction", RaidProgression.ShouldRespawn(true, "ExtractionPhase"), false },
+    { "dead player respawns in lobby", RaidProgression.ShouldRespawn(true, "LobbyPhase"), true },
+    { "living player is not respawned", RaidProgression.ShouldRespawn(false, "LobbyPhase"), false },
+    { "loot drops during active loot phase", RaidProgression.ShouldDropLoot("LootPhase", false, 1), true },
+    { "escaped player keeps loot", RaidProgression.ShouldDropLoot("ExtractionPhase", true, 1), false },
+    { "empty inventory creates no drop", RaidProgression.ShouldDropLoot("LootPhase", false, 0), false },
+}
+
+local passed = 0
+for _, check in ipairs(checks) do
+    local name, actual, expected = check[1], check[2], check[3]
+    if actual == expected then
+        passed += 1
+        print("[PASS][RaidProgression] " .. name)
+    else
+        error(string.format("[FAIL][RaidProgression] %s: expected %s, got %s", name, tostring(expected), tostring(actual)))
+    end
+end
+
+print(string.format("[RaidProgression] Studio smoke tests passed: %d/%d", passed, #checks))
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="9">
+        <Properties>
+          <string name="Name">TestRunner</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
+local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
+
+local totalCount = 0
+local passCount = 0
+local failCount = 0
+
+local function AssertTest(testName: string, actual: any, expected: any)
+    totalCount += 1
+    if actual == expected then
+        passCount += 1
+        print(string.format("  [PASS] %s", testName))
+    else
+        failCount += 1
+        warn(string.format("  [FAIL] %s | Ожидалось: %s, Получено: %s", testName, tostring(expected), tostring(actual)))
+    end
+end
+
+local function RunSuite()
+    task.wait(0.1) -- Даем консоли инициализироваться
+
+    print("\n========================================================")
+    print("           ПОЛНЫЙ ПРОГОН АВТОТЕСТОВ СИСТЕМЫ             ")
+    print("========================================================")
+
+    -- ----------------------------------------------------
+    -- БЛОК 1: ИНВЕНТАРЬ И ВЕС
+    -- ----------------------------------------------------
+    print("\n-- [1. Инвентарь, Вес и Лимиты] --")
+    AssertTest("Предмет влезает (18 + 5 <= 25 кг)", LootLogic.CanAddItem(18, 5, 25), true)
+    AssertTest("Граничный случай: точное заполнение (20 + 5 == 25)", LootLogic.CanAddItem(20, 5, 25), true)
+    AssertTest("Блокировка перегруза (24 + 1.5 > 25)", LootLogic.CanAddItem(24, 1.5, 25), false)
+
+    -- ----------------------------------------------------
+    -- БЛОК 2: СКОРОСТЬ ПЕРЕДВИЖЕНИЯ
+    -- ----------------------------------------------------
+    print("\n-- [2. Кривая скорости ходьбы] --")
+    -- Базовая: 16, Мин: 8, Макс вес: 20
+    AssertTest("Пустой рюкзак (0 кг) -> скорость 16 studs/s", LootLogic.CalculateWalkSpeed(0, 20, 16, 8), 16)
+    AssertTest("Половина веса (10 кг) -> скорость 12 studs/s", LootLogic.CalculateWalkSpeed(10, 20, 16, 8), 12)
+    AssertTest("Полный вес (20 кг) -> минимальная скорость 8 studs/s", LootLogic.CalculateWalkSpeed(20, 20, 16, 8), 8)
+    AssertTest("Сверхлимит (30 кг при максе 20) -> не падает ниже 8", LootLogic.CalculateWalkSpeed(30, 20, 16, 8), 8)
+
+    -- ----------------------------------------------------
+    -- БЛОК 3: БАЛАНС И ПОКУПКА ЭКИПИРОВКИ
+    -- ----------------------------------------------------
+    print("\n-- [3. Автосеты и Баланс Cash] --")
+    local canBuy1, remCash1 = LootLogic.CanAffordLoadout(1000, 350)
+    AssertTest("Покупка сета за $350 при балансе $1000 разрешена", canBuy1, true)
+    AssertTest("Корректный остаток ($1000 - $350 = $650)", remCash1, 650)
+
+    local canBuy2, remCash2 = LootLogic.CanAffordLoadout(300, 600)
+    AssertTest("Отказ в покупке при балансе $300 и цене $600", canBuy2, false)
+    AssertTest("Баланс игрока остался нетронутым ($300)", remCash2, 300)
+
+    -- ----------------------------------------------------
+    -- БЛОК 4: ХРУПКИЙ ЛУТ И ПАДЕНИЯ
+    -- ----------------------------------------------------
+    print("\n-- [4. Физика хрупкого лута] --")
+    local testPack = {
+        { Name = "Золотые часы", Weight = 1.5, Value = 150, Fragile = false },
+        { Name = "Античная ваза", Weight = 4.0, Value = 550, Fragile = true },
+        { Name = "Слиток", Weight = 8.0, Value = 450, Fragile = false }
+    }
+
+    -- Прыжок с безопасной высоты 10 studs (порог 14)
+    local safeRem, safeBroken = LootLogic.ProcessFallDamage(testPack, 10, 14)
+    AssertTest("Падение с высоты 10 studs: разбито 0 предметов", #safeBroken, 0)
+    AssertTest("Падение с высоты 10 studs: сохранено 3 предмета", #safeRem, 3)
+
+    -- Жесткое падение с высоты 18 studs
+    local hardRem, hardBroken, newW, newV = LootLogic.ProcessFallDamage(testPack, 18, 14)
+    AssertTest("Падение с высоты 18 studs: разбита ваза (1 предмет)", #hardBroken, 1)
+    AssertTest("В рюкзаке осталось 2 предмета", #hardRem, 2)
+    AssertTest("Вес пересчитан без вазы (1.5 + 8.0 = 9.5 кг)", newW, 9.5)
+    AssertTest("Стоимость пересчитана без вазы (150 + 450 = 600)", newV, 600)
+
+    -- ----------------------------------------------------
+    -- БЛОК 5: ЗРЕНИЕ ИИ ОХРАННИКА
+    -- ----------------------------------------------------
+    print("\n-- [5. Зрение и Обнаружение Охранника] --")
+    local guardPos = Vector3.new(0, 3, 0)
+    local guardForward = Vector3.new(0, 0, -1) -- Смотрит строго на Север (-Z)
+
+    -- Игрок прямо перед глазами на дистанции 25 studs (в пределах 55)
+    local playerInFront = Vector3.new(0, 3, -25)
+    AssertTest("Игрок прямо в луче света -> Обнаружен", LootLogic.IsPlayerDetected(guardPos, guardForward, playerInFront, 55, 0.35, 12), true)
+
+    -- Игрок сбоку под углом 90 градусов
+    local playerSide = Vector3.new(25, 3, 0)
+    AssertTest("Игрок сбоку вне конуса обзора -> Не обнаружен", LootLogic.IsPlayerDetected(guardPos, guardForward, playerSide, 55, 0.35, 12), false)
+
+    -- Игрок слишком далеко (70 studs при максимуме 55)
+    local playerFar = Vector3.new(0, 3, -70)
+    AssertTest("Игрок в конусе, но дальше дальности зрения -> Не обнаружен", LootLogic.IsPlayerDetected(guardPos, guardForward, playerFar, 55, 0.35, 12), false)
+
+    -- Игрок подошел вплотную со спины (дистанция 8 studs при чутье 12)
+    local playerBackClose = Vector3.new(0, 3, 8)
+    AssertTest("Игрок подошел со спины вплотную (8 studs) -> Сработало чутье", LootLogic.IsPlayerDetected(guardPos, guardForward, playerBackClose, 55, 0.35, 12), true)
+
+    -- Игрок со спины вдалеке (дистанция 20 studs)
+    local playerBackFar = Vector3.new(0, 3, 20)
+    AssertTest("Игрок со спины на дистанции 20 studs -> Не обнаружен", LootLogic.IsPlayerDetected(guardPos, guardForward, playerBackFar, 55, 0.35, 12), false)
+
+    -- ----------------------------------------------------
+    -- БЛОК 6: РЕАКЦИЯ НА ШУМ
+    -- ----------------------------------------------------
+    print("\n-- [6. Слух и Детекция шума] --")
+    local deathDropSource = {
+        { Name = "Золотые часы", Weight = 1.5, Value = 150 },
+        { Name = "Слиток", Weight = 8.0, Value = 450 }
+    }
+    local deathDropItems = LootLogic.GetDeathDropItems(deathDropSource)
+    AssertTest("При смерти копируются все предметы инвентаря", #deathDropItems, 2)
+    AssertTest("Порядок предметов при выбросе сохраняется", deathDropItems[1].Name, "Золотые часы")
+    AssertTest("Подготовка выброса не очищает исходный инвентарь", #deathDropSource, 2)
+
+    local noiseNearby = Vector3.new(20, 3, 0) -- Дистанция 20 studs
+    AssertTest("Шум в радиусе слышимости (20 <= 40) -> Услышан", LootLogic.IsNoiseAudible(guardPos, noiseNearby, 40), true)
+
+    local noiseFaraway = Vector3.new(50, 3, 0) -- Дистанция 50 studs
+    AssertTest("Шум за пределами радиуса (50 > 40) -> Не услышан", LootLogic.IsNoiseAudible(guardPos, noiseFaraway, 40), false)
+
+    -- Повышенная готовность временно усиливает зрение и скорость охранника.
+    local normalAwareness = LootLogic.GetGuardAwareness(false)
+    AssertTest("Обычная дальность зрения охранника", normalAwareness.ViewDistance, 55)
+    AssertTest("Обычная скорость патруля", normalAwareness.PatrolSpeed, 13.5)
+
+    local alertedAwareness = LootLogic.GetGuardAwareness(true)
+    AssertTest("Дальность зрения при тревоге", alertedAwareness.ViewDistance, 70)
+    AssertTest("Более широкий обзор при тревоге", alertedAwareness.FovDotThreshold, 0.2)
+    AssertTest("Увеличенная скорость патруля при тревоге", alertedAwareness.PatrolSpeed, 16)
+    AssertTest("Увеличенная скорость поиска при тревоге", alertedAwareness.SearchSpeed, 18)
+
+    -- ----------------------------------------------------
+    -- БЛОК 7: ДЫМОВАЯ ЗАВЕСА И ТАЙЗЕР
+    -- ----------------------------------------------------
+    print("\n-- [7. Гаджеты: Дым и Шокер] --")
+-- Дым брошен на дистанции 20 studs в направлении Севера (Z = -20)
+    local smokeBetween = { Vector3.new(0, 3, -20) }
+
+    -- 1. Игрок стоит внутри дыма на Z = -22 (дистанция до дыма 2 studs <= 10)
+    AssertTest("Игрок внутри дымового облака -> Зрение заблокировано", 
+        LootLogic.IsVisionBlockedBySmoke(smokeBetween, guardPos, Vector3.new(0, 3, -22), 10), true)
+
+    -- 2. Игрок стоит далеко сбоку (50, 3, 50), дым на (0, 3, -20) не задевает охранника и линию взгляда
+    AssertTest("Игрок на позиции (50, 3, 50) вне дыма -> Зрение не заблокировано", 
+        LootLogic.IsVisionBlockedBySmoke(smokeBetween, guardPos, Vector3.new(50, 3, 50), 10), false)
+
+    -- Дым между охранником и игроком также должен блокировать обзор.
+    local smokeAcrossSightline = { Vector3.new(0, 3, -12) }
+    AssertTest("Дым между охранником и игроком -> Зрение заблокировано",
+        LootLogic.IsVisionBlockedBySmoke(smokeAcrossSightline, guardPos, Vector3.new(0, 3, -25), 10), true)
+
+    AssertTest("Выстрел тайзера с 25 studs (макс 45) -> Попадание", LootLogic.CanTaserHit(Vector3.zero, Vector3.new(0, 0, 25), 45), true)
+    AssertTest("Выстрел тайзера с 60 studs (макс 45) -> Промах по дальности", LootLogic.CanTaserHit(Vector3.zero, Vector3.new(0, 0, 60), 45), false)
+
+-- ----------------------------------------------------
+    -- БЛОК 8: ЭКОНОМИКА УБЕЖИЩА И АПГРЕЙДЫ
+    -- ----------------------------------------------------
+    print("\n-- [8. Прогресс убежища и апгрейды] --")
+    local costLvl0 = LootLogic.GetUpgradeCost("Pockets", 0)
+    AssertTest("Стоимость 1 уровня карманов равна базе (500)", costLvl0, 500)
+
+    local costLvlMax = LootLogic.GetUpgradeCost("Pockets", 3)
+    AssertTest("Попытка купить апгрейд выше MaxLevel возвращает nil", costLvlMax, nil)
+
+    local canUp, leftCash, newLvl = LootLogic.CanPurchaseUpgrade(1000, "Pockets", 0)
+    AssertTest("Успешная покупка 1 уровня ремней при $1000", canUp, true)
+    AssertTest("Списание денег за апгрейд ($1000 - $500 = $500)", leftCash, 500)
+    AssertTest("Уровень повышен до 1", newLvl, 1)
+
+    local failUp, unchCash = LootLogic.CanPurchaseUpgrade(200, "Pockets", 0)
+    AssertTest("Отказ в покупке ремней при недостатке денег ($200 < $500)", failUp, false)
+    AssertTest("Деньги не списались при отказе", unchCash, 200)
+
+    local effWeight = LootLogic.GetEffectiveMaxWeight(25, 2)
+    AssertTest("Финальный вес сета 25 кг с ремнями 2 ур (+10 кг) = 35 кг", effWeight, 35)
+
+    local effLight = LootLogic.GetEffectiveFlashlightRange(75, 1)
+    AssertTest("Дальность фонаря 75 + акб 1 ур (+15 studs) = 90 studs", effLight, 90)
+
+    -- ----------------------------------------------------
+    -- БЛОК 10: СЕРИЯ УСПЕШНЫХ РЕЙДОВ
+    -- ----------------------------------------------------
+    print("\n-- [10. Серия рейдов и бонус к выручке] --")
+    AssertTest("Серия 0 -> бонус 0%", LootLogic.GetStreakBonusPercent(0), 0)
+    AssertTest("Серия 1 -> бонус 10%", LootLogic.GetStreakBonusPercent(1), 10)
+    AssertTest("Серия 3 -> бонус 30%", LootLogic.GetStreakBonusPercent(3), 30)
+    AssertTest("Серия 5 -> бонус 50% (максимум)", LootLogic.GetStreakBonusPercent(5), 50)
+    AssertTest("Серия выше лимита не увеличивает бонус", LootLogic.GetStreakBonusPercent(9), 50)
+    AssertTest("Отрицательная серия даёт нулевой бонус", LootLogic.GetStreakBonusPercent(-2), 0)
+    AssertTest("Без серии выплата не меняется", LootLogic.ApplyStreakBonus(1000, 0), 1000)
+    AssertTest("Серия 3: выплата 1000 -> 1300", LootLogic.ApplyStreakBonus(1000, 3), 1300)
+    AssertTest("Дробная часть выплаты округляется вниз", LootLogic.ApplyStreakBonus(155, 1), 170)
+
+    -- ----------------------------------------------------
+    -- БЛОК 11: НОЧНЫЕ СОБЫТИЯ
+    -- ----------------------------------------------------
+    print("\n-- [11. Ночные события] --")
+    AssertTest("roll 0.15 выбирает Чёрную ночь", NightEvents.Pick(0.15).Id, "Blackout")
+    AssertTest("roll 0.4 выбирает Красную тревогу", NightEvents.Pick(0.4).Id, "RedAlert")
+    AssertTest("roll 0.6 выбирает Джекпот", NightEvents.Pick(0.6).Id, "Jackpot")
+    AssertTest("roll 0.9 выбирает Тихую ночь", NightEvents.Pick(0.9).Id, "Calm")
+    AssertTest("У всех событий положительный вес", (function()
+        for _, event in ipairs(NightEvents.Events) do
+            if event.Weight <= 0 then return false end
+        end
+        return true
+    end)(), true)
+    local baseLoot = { Name = "Тест", Value = 100, Weight = 2, Color = Color3.new(1, 1, 1), Fragile = true }
+    local scaledLoot = NightEvents.ScaleLootValue(baseLoot, 1.5)
+    AssertTest("Множитель 1.5 повышает стоимость 100 до 150", scaledLoot.Value, 150)
+    AssertTest("Масштабирование не меняет вес предмета", scaledLoot.Weight, 2)
+    AssertTest("Исходный предмет остаётся неизменным", baseLoot.Value, 100)
+    local awareness = LootLogic.GetGuardAwareness(false)
+    local blackoutAwareness = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.15))
+    AssertTest("Чёрная ночь уменьшает обзор охранника", blackoutAwareness.ViewDistance, 38.5)
+    local alertAwareness = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.4))
+    AssertTest("Красная тревога увеличивает обзор охранника", alertAwareness.ViewDistance, 66)
+    AssertTest("Джекпот содержит корону", NightEvents.Pick(0.6).JackpotLoot.Name, "Золотая корона")
+
+    print("\n--------------------------------------------------------")
+    if failCount == 0 then
+        print(string.format("РЕЗУЛЬТАТ: ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ! (%d/%d)", passCount, totalCount))
+    else
+        warn(string.format("РЕЗУЛЬТАТ: ОБНАРУЖЕНЫ ОШИБКИ! Пройдено: %d, Провалено: %d из %d", passCount, failCount, totalCount))
+    end
+    print("========================================================\n")
+end
+
+task.spawn(RunSuite)
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+</roblox>

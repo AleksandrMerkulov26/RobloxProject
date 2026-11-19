@@ -1,152 +1,56 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+--!strict
 local Players = game:GetService("Players")
--- Players must stay eliminated after death until the next raid starts.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 Players.CharacterAutoLoads = false
-local DataStoreService = game:GetService("DataStoreService")
-local RunService = game:GetService("RunService")
-local Lighting = game:GetService("Lighting")
-local PathfindingService = game:GetService("PathfindingService")
 
--- ========================================================
--- 1. СЕТЕВАЯ ИНФРАСТРУКТУРА (ГАРАНТИРОВАННОЕ СОЗДАНИЕ В ПЕРВУЮ ОЧЕРЕДЬ)
--- ========================================================
-local networkFolder = ReplicatedStorage:FindFirstChild("Network")
-if not networkFolder then
-    networkFolder = Instance.new("Folder")
-    networkFolder.Name = "Network"
-    networkFolder.Parent = ReplicatedStorage
-end
-
-local function getOrCreateRemote(name: string, classType: string)
-    local existing = networkFolder:FindFirstChild(name)
-    if existing then return existing end
-    local remote = Instance.new(classType)
-    remote.Name = name
-    remote.Parent = networkFolder
-    return remote
-end
-
-local currentPhaseValue = getOrCreateRemote("CurrentPhase", "StringValue")
-currentPhaseValue.Value = "LobbyPhase"
-
-local stateChangedEvent = getOrCreateRemote("StateChanged", "RemoteEvent")
-local inventoryUpdatedEvent = getOrCreateRemote("InventoryUpdated", "RemoteEvent")
-local extractionProgressEvent = getOrCreateRemote("ExtractionProgress", "RemoteEvent")
-local dropItemEvent = getOrCreateRemote("DropItem", "RemoteEvent")
-local selectLoadoutEvent = getOrCreateRemote("SelectLoadout", "RemoteEvent")
-local loadoutAppliedEvent = getOrCreateRemote("LoadoutApplied", "RemoteEvent")
-local loadoutsUpdatedEvent = getOrCreateRemote("LoadoutsUpdated", "RemoteEvent")
-local getOwnedLoadoutsFunction = getOrCreateRemote("GetOwnedLoadouts", "RemoteFunction")
-local makeNoiseEvent = getOrCreateRemote("MakeNoise", "RemoteEvent")
-local raidSummaryEvent = getOrCreateRemote("ShowRaidSummary", "RemoteEvent")
-local throwSmokeEvent = getOrCreateRemote("ThrowSmoke", "RemoteEvent")
-local fireTaserEvent = getOrCreateRemote("FireTaser", "RemoteEvent")
-local buyUpgradeEvent = getOrCreateRemote("BuyUpgrade", "RemoteEvent")
-local upgradesUpdatedEvent = getOrCreateRemote("UpgradesUpdated", "RemoteEvent")
-local openHideoutStationEvent = getOrCreateRemote("OpenHideoutStation", "RemoteEvent")
-local getRaidStatusFunction = getOrCreateRemote("GetRaidStatus", "RemoteFunction")
-local startRaidEvent = getOrCreateRemote("StartRaid", "RemoteEvent")
-local nightEventEvent = getOrCreateRemote("NightEvent", "RemoteEvent")
-local currentNightEventValue = getOrCreateRemote("CurrentNightEvent", "StringValue")
-currentNightEventValue.Value = ""
-
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
-local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
-local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
 local RaidProgression = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RaidProgression"))
+local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
 
--- Настройки освещения склада
-Lighting.ClockTime = 0
-Lighting.Brightness = 0
-Lighting.Ambient = Color3.fromRGB(30, 32, 38)
-Lighting.OutdoorAmbient = Color3.fromRGB(30, 32, 38)
-Lighting.FogColor = Color3.fromRGB(10, 10, 15)
-Lighting.FogEnd = 160
-Lighting.FogStart = 30
-Lighting.GlobalShadows = false
-local BASE_AMBIENT = Lighting.Ambient
-local BASE_OUTDOOR_AMBIENT = Lighting.OutdoorAmbient
-local BASE_FOG_END = Lighting.FogEnd
-local MAX_STAT_VALUE = 2000000000
-local MAX_STREAK = 5
+local Remotes = require(script:WaitForChild("Remotes"))
+local DataService = require(script:WaitForChild("DataService"))
+local LootService = require(script:WaitForChild("LootService"))
+local LoadoutService = require(script:WaitForChild("LoadoutService"))
+local UpgradeService = require(script:WaitForChild("UpgradeService"))
+local GuardAI = require(script:WaitForChild("GuardAI"))
+local RoundController = require(script:WaitForChild("RoundController"))
+local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
+local AnalyticsService = require(script:WaitForChild("AnalyticsService"))
+local CoopService = require(script:WaitForChild("CoopService"))
+local ReplayService = require(script:WaitForChild("ReplayService"))
 
--- ========================================================
--- 2. БАЗА ДАННЫХ DATASTORE
--- ========================================================
--- Бесплатные комплекты включаются только в Roblox Studio.
--- Для тестов используется отдельное хранилище, не затрагивающее данные игроков.
-local TEST_MODE = RunService:IsStudio()
+-- Инициализация систем
+UpgradeService.Init()
+RoundController.InitFacility()
 
-local PlayerDataStore = nil
-local dataStoreAvailable = false
-local dsSuccess = pcall(function()
-    local dataStoreName = TEST_MODE and "PlayerProgress_Test_v1" or "PlayerProgress_v3"
-    PlayerDataStore = DataStoreService:GetDataStore(dataStoreName)
-end)
-if dsSuccess and PlayerDataStore then
-    dataStoreAvailable = true
-    print("[СЕРВЕР]: DataStore подключен.")
+-- Убежища и элиминации
+local playerHideouts: { [Player]: { Model: Model, SpawnCFrame: CFrame, Data: any } } = {}
+local playerHideoutSlots: { [Player]: number } = {}
+local hideoutSlotOwners: { [number]: Player? } = {}
+local eliminatedPlayers: { [Player]: boolean } = {}
+local remoteActionTimes: { [Player]: { [string]: number } } = {}
+
+local existingSmokes = workspace:FindFirstChild("Smokes")
+local smokesContainer: Folder
+if existingSmokes and existingSmokes:IsA("Folder") then
+    smokesContainer = existingSmokes
+else
+    local folder = Instance.new("Folder")
+    folder.Name = "Smokes"
+    folder.Parent = workspace
+    smokesContainer = folder
 end
 
--- ========================================================
--- 3. ПАПКИ И СОСТОЯНИЕ МИРА
--- ========================================================
-local lootContainer = workspace:FindFirstChild("LootItems")
-if not lootContainer then
-    lootContainer = Instance.new("Folder")
-    lootContainer.Name = "LootItems"
-    lootContainer.Parent = workspace
+local function loadCharacterForPlayer(player: Player)
+    if player.Parent == Players then
+        pcall(function()
+            player:LoadCharacterAsync()
+        end)
+    end
 end
-lootContainer.Name = "LootItems"
 
-local weaponsContainer = workspace:FindFirstChild("GroundWeapons")
-if not weaponsContainer then
-    weaponsContainer = Instance.new("Folder")
-    weaponsContainer.Name = "GroundWeapons"
-    weaponsContainer.Parent = workspace
-end
-weaponsContainer.Name = "GroundWeapons"
-
-local hazardsContainer = workspace:FindFirstChild("Hazards")
-if not hazardsContainer then
-    hazardsContainer = Instance.new("Folder")
-    hazardsContainer.Name = "Hazards"
-    hazardsContainer.Parent = workspace
-end
-hazardsContainer.Name = "Hazards"
-
-local smokesContainer = workspace:FindFirstChild("Smokes")
-if not smokesContainer then
-    smokesContainer = Instance.new("Folder")
-    smokesContainer.Name = "Smokes"
-    smokesContainer.Parent = workspace
-end
-smokesContainer.Name = "Smokes"
-
-local playerInventories = {}
-local extractingPlayers = {}
-local playerActiveLoadouts = {}
-local playerOwnedLoadouts = {}
-local playerUpgrades = {}
--- Сохранять данные можно только после успешного чтения DataStore.
-local playerDataLoaded = {}
--- Prevent overlapping DataStore writes for the same player.
-local playerSaveInProgress = {}
-local playerHideouts = {}
-local playerHideoutSlots = {}
-local hideoutSlotOwners = {}
--- Prevent laser Touched events from damaging one player repeatedly.
-local playerLaserHitTimes = {}
--- Players eliminated during an active raid stay in their hideout until the next round.
-local eliminatedPlayers = {}
-local remoteActionTimes = {}
-local currentSuspiciousNoise = nil
-local activeNightEvent = NightEvents.None
-local guardStunnedUntil = 0
-local guardAlertUntil = 0
-
-local function canPerformAction(player, actionName, cooldown)
+local function canPerformAction(player: Player, actionName: string, cooldown: number): boolean
     local now = os.clock()
     local actions = remoteActionTimes[player]
     if not actions then
@@ -163,296 +67,273 @@ local function canPerformAction(player, actionName, cooldown)
     return true
 end
 
-local function LoadCharacterForPlayer(player)
-    if player.Parent ~= Players then return end
-
-    local success, err = pcall(function()
-        player:LoadCharacterAsync()
-    end)
-    if not success then
-        warn(string.format("[Raid] Не удалось возродить игрока %s: %s", player.Name, tostring(err)))
-    end
+local function isPlayerEliminated(player: Player): boolean
+    return eliminatedPlayers[player] == true
 end
 
-local function isFiniteVector3(value)
-    return typeof(value) == "Vector3"
-        and value.X == value.X and math.abs(value.X) < 100000
-        and value.Y == value.Y and math.abs(value.Y) < 100000
-        and value.Z == value.Z and math.abs(value.Z) < 100000
+local function getEffectiveMaxWeight(player: Player): number
+    local loadout = LoadoutService.GetActiveLoadout(player)
+    local upg = DataService.GetUpgrades(player)
+    return LootLogic.GetEffectiveMaxWeight(loadout.MaxWeight, upg.Pockets)
 end
 
--- ========================================================
--- 4. ГЕНЕРАТОР КАРТЫ С УТОЛЩЕННЫМ ПОЛОМ И СКУПЩИКОМ
--- ========================================================
-local function BuildFacility()
-    local oldFacility = workspace:FindFirstChild("HeistFacility")
-    if oldFacility then oldFacility:Destroy() end
+local function getHideoutSpawn(player: Player): CFrame
+    local hideout = playerHideouts[player]
+    return hideout and hideout.SpawnCFrame or CFrame.new(0, 123, 0)
+end
 
-    local facility = Instance.new("Folder")
-    facility.Name = "HeistFacility"
-    facility.Parent = workspace
+-- Внедрение зависимостей в сервисы
+LootService.SetDependencies({
+    GetEffectiveMaxWeight = getEffectiveMaxWeight,
+    GetActiveLoadout = function(player: Player) return LoadoutService.GetActiveLoadout(player) end,
+    IsPlayerEliminated = isPlayerEliminated,
+})
 
-    local lootSpawnPoints = {}
+GuardAI.SetDependencies({
+    IsPlayerEliminated = isPlayerEliminated,
+    GetActiveNightEvent = function() return RoundController.GetActiveNightEvent() end,
+})
 
-    local function createWall(name, size, pos, color, material)
-        local part = Instance.new("Part")
-        part.Name = name
-        part.Size = size
-        part.Position = pos
-        part.Anchored = true
-        part.Material = material or Enum.Material.Concrete
-        part.Color = color or Color3.fromRGB(45, 48, 55)
-        part.CastShadow = false
-        part.Parent = facility
-        return part
-    end
+RoundController.SetDependencies({
+    IsPlayerEliminated = isPlayerEliminated,
+    ResetPlayerForRound = function(player: Player)
+        eliminatedPlayers[player] = false
+        player:SetAttribute("Eliminated", false)
+        LootService.ResetForRound(player)
+        local curLoadout = LoadoutService.GetActiveLoadout(player)
+        LoadoutService.ApplyLoadout(player, curLoadout)
 
-    -- Утолщенный пол ангара (толщина 10 studs)
-    for x = -60, 60, 40 do
-        for z = -60, 60, 40 do
-            createWall("FloorTile", Vector3.new(40, 10, 40), Vector3.new(x, -5, z), Color3.fromRGB(30, 32, 36))
-        end
-    end
-
-    createWall("WallNorth", Vector3.new(160, 32, 4), Vector3.new(0, 16, -80))
-    createWall("WallSouth", Vector3.new(160, 32, 4), Vector3.new(0, 16, 80))
-    createWall("WallWest", Vector3.new(4, 32, 160), Vector3.new(-80, 16, 0))
-    createWall("WallEast", Vector3.new(4, 32, 160), Vector3.new(80, 16, 0))
-
-    for x = -60, 60, 40 do
-        for z = -60, 60, 40 do
-            createWall("RoofTile", Vector3.new(40, 2, 40), Vector3.new(x, 32, z), Color3.fromRGB(20, 22, 25))
-        end
-    end
-
-    local columnCoords = {
-        Vector3.new(-40, 15, -40), Vector3.new(40, 15, -40),
-        Vector3.new(-40, 15, 40), Vector3.new(40, 15, 40)
-    }
-    for _, cPos in columnCoords do
-        createWall("Pillar", Vector3.new(4, 30, 4), Vector3.new(cPos.X, 15, cPos.Z), Color3.fromRGB(60, 65, 75), Enum.Material.Metal)
-    end
-
-    createWall("BeamNorth", Vector3.new(80, 2, 4), Vector3.new(0, 24, -40), Color3.fromRGB(80, 85, 95), Enum.Material.Metal)
-    createWall("BeamSouth", Vector3.new(80, 2, 4), Vector3.new(0, 24, 40), Color3.fromRGB(80, 85, 95), Enum.Material.Metal)
-
-    local containers = {
-        { Pos = Vector3.new(-25, 6, -20), Size = Vector3.new(14, 12, 28), Color = Color3.fromRGB(150, 40, 40) },
-        { Pos = Vector3.new(30, 6, -15), Size = Vector3.new(28, 12, 14), Color = Color3.fromRGB(40, 80, 150) },
-        { Pos = Vector3.new(-20, 6, 30), Size = Vector3.new(24, 12, 14), Color = Color3.fromRGB(45, 120, 60) },
-        { Pos = Vector3.new(25, 6, 35), Size = Vector3.new(14, 12, 24), Color = Color3.fromRGB(160, 100, 30) },
-        { Pos = Vector3.new(-25, 18, -20), Size = Vector3.new(14, 12, 24), Color = Color3.fromRGB(70, 75, 85) }
-    }
-
-    for _, c in containers do
-        createWall("Container", c.Size, c.Pos, c.Color, Enum.Material.DiamondPlate)
-        table.insert(lootSpawnPoints, c.Pos + Vector3.new(0, c.Size.Y / 2 + 1.5, 0))
-    end
-
-    table.insert(lootSpawnPoints, Vector3.new(0, 1.5, 0))
-    table.insert(lootSpawnPoints, Vector3.new(-50, 1.5, -50))
-    table.insert(lootSpawnPoints, Vector3.new(50, 1.5, 50))
-    table.insert(lootSpawnPoints, Vector3.new(-50, 1.5, 50))
-    table.insert(lootSpawnPoints, Vector3.new(50, 1.5, -50))
-
-    local lampPositions = {
-        Vector3.new(0, 20, -78), Vector3.new(0, 20, 78),
-        Vector3.new(-78, 20, 0), Vector3.new(78, 20, 0)
-    }
-    for _, lPos in lampPositions do
-        local lampPart = createWall("LampPart", Vector3.new(4, 1, 1), lPos, Color3.fromRGB(255, 120, 40), Enum.Material.Neon)
-        local pLight = Instance.new("PointLight")
-        pLight.Range = 25
-        pLight.Brightness = 1.0
-        pLight.Color = Color3.fromRGB(255, 140, 50)
-        pLight.Shadows = false
-        pLight.Parent = lampPart
-    end
-
-    -- Запертое хранилище
-    createWall("VaultWallW", Vector3.new(2, 14, 20), Vector3.new(50, 7, -30), Color3.fromRGB(20, 22, 25), Enum.Material.Metal)
-    createWall("VaultWallN", Vector3.new(20, 14, 2), Vector3.new(60, 7, -40), Color3.fromRGB(20, 22, 25), Enum.Material.Metal)
-    createWall("VaultRoof", Vector3.new(20, 2, 20), Vector3.new(60, 14, -30), Color3.fromRGB(15, 18, 20), Enum.Material.Metal)
-
-    local vaultDoor = createWall("VaultDoor", Vector3.new(18, 12, 1.5), Vector3.new(60, 6, -20), Color3.fromRGB(180, 50, 50), Enum.Material.DiamondPlate)
-    local doorPrompt = Instance.new("ProximityPrompt")
-    doorPrompt.ActionText = "Взломать"
-    doorPrompt.ObjectText = "Сейфовая дверь"
-    doorPrompt.KeyboardKeyCode = Enum.KeyCode.E
-    doorPrompt.HoldDuration = 2.5
-    doorPrompt.MaxActivationDistance = 9
-    doorPrompt.RequiresLineOfSight = false
-    doorPrompt.Parent = vaultDoor
-
-    doorPrompt.Triggered:Connect(function(player)
-        if eliminatedPlayers[player] then return end
         local character = player.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then return end
-        doorPrompt.Enabled = false
-        vaultDoor.Transparency = 0.8
-        vaultDoor.CanCollide = false
-        vaultDoor.Color = Color3.fromRGB(50, 200, 80)
-        currentSuspiciousNoise = { Position = vaultDoor.Position, Radius = 120, Timestamp = os.clock() }
-        local inv = playerInventories[player]
-        if inv then inventoryUpdatedEvent:FireClient(player, inv, "Сработала сирена сейфа!") end
-    end)
+        if not humanoid or humanoid.Health <= 0 then
+            pcall(function() player:LoadCharacterAsync() end)
+        end
+    end,
+    GetHideoutSpawn = getHideoutSpawn,
+})
 
-    table.insert(lootSpawnPoints, Vector3.new(60, 1.5, -30))
-    table.insert(lootSpawnPoints, Vector3.new(65, 1.5, -35))
-
-    -- Персональные убежища строятся HideoutBuilder для каждого игрока.
-
-    return lootSpawnPoints
+local function AllocateHideoutSlot(player: Player): number
+    for slot = 1, math.max(Players.MaxPlayers, 1) do
+        if not hideoutSlotOwners[slot] then
+            hideoutSlotOwners[slot] = player
+            playerHideoutSlots[player] = slot
+            return slot
+        end
+    end
+    local slot = Players.MaxPlayers + 1
+    while hideoutSlotOwners[slot] do slot += 1 end
+    hideoutSlotOwners[slot] = player
+    playerHideoutSlots[player] = slot
+    return slot
 end
 
-local activeLootPositions = BuildFacility()
+local function handlePlayerElimination(player: Player, hrpPosition: Vector3)
+    local phase = Remotes.CurrentPhase.Value
+    local raidIsActive = RaidProgression.ShouldEliminate(phase)
+    if raidIsActive then
+        eliminatedPlayers[player] = true
+        player:SetAttribute("Eliminated", true)
+        local curLoadout = LoadoutService.GetActiveLoadout(player)
+        AnalyticsService.OnPlayerEliminated(player, "GuardOrHazard", curLoadout.Id)
+    end
 
--- ========================================================
--- 5. ХАЗАРДЫ: ЛАЗЕРЫ
--- ========================================================
-local function SpawnLasers()
-    hazardsContainer:ClearAllChildren()
-    local laserConfigs = {
-        { Pos = Vector3.new(0, 2.5, -15), Size = Vector3.new(50, 0.4, 0.4) },
-        { Pos = Vector3.new(0, 2.5, 25), Size = Vector3.new(50, 0.4, 0.4) },
-        { Pos = Vector3.new(60, 2.5, -20), Size = Vector3.new(18, 0.4, 0.4) }
+    local inv = LootService.GetInventory(player)
+    local shouldDrop = inv and RaidProgression.ShouldDropLoot(phase, inv.Escaped, #inv.Items) or false
+    LootService.HandlePlayerDeath(player, hrpPosition, shouldDrop)
+
+    task.delay(2, function()
+        if player.Parent == Players then
+            loadCharacterForPlayer(player)
+        end
+    end)
+end
+
+CoopService.SetDependencies({
+    IsPlayerEliminated = isPlayerEliminated,
+    OnPlayerFullyDied = function(player: Player)
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local pos = hrp and hrp.Position or Vector3.zero
+        handlePlayerElimination(player, pos)
+    end,
+    GetPlayerRole = function(player: Player)
+        local loadout = LoadoutService.GetActiveLoadout(player)
+        return loadout.Role or "Default"
+    end,
+})
+
+local function InitPlayer(player: Player)
+    DataService.LoadPlayerData(player)
+
+    local slot = AllocateHideoutSlot(player)
+    local hideoutData = DataService.GetHideoutData(player)
+    local hideoutModel, spawnCFrame, dealerPrompt, stationPrompts = HideoutBuilder.Build(player.UserId, slot, hideoutData)
+
+    playerHideouts[player] = {
+        Model = hideoutModel,
+        SpawnCFrame = spawnCFrame,
+        Data = hideoutData,
     }
-    for _, lData in laserConfigs do
-        local laser = Instance.new("Part")
-        laser.Name = "AlarmLaser"
-        laser.Size = lData.Size
-        laser.Position = lData.Pos
-        laser.Anchored = true
-        laser.CanCollide = false
-        laser.Material = Enum.Material.Neon
-        laser.Color = Color3.fromRGB(255, 0, 50)
-        laser.CastShadow = false
-        laser.Parent = hazardsContainer
 
-        laser.Touched:Connect(function(hit)
-            local char = hit.Parent
-            local pHum = char and char:FindFirstChildOfClass("Humanoid")
-            local player = Players:GetPlayerFromCharacter(char)
-            if not pHum or not player or pHum.Health <= 0 or player.Character ~= char then return end
-            if eliminatedPlayers[player] or (playerInventories[player] and playerInventories[player].Escaped) then return end
+    dealerPrompt.Triggered:Connect(function(triggeringPlayer: Player)
+        if triggeringPlayer ~= player then return end
+        local upg = DataService.GetUpgrades(player)
+        Remotes.UpgradesUpdated:FireClient(player, upg, true)
+    end)
 
-            local now = os.clock()
-            local lastHit = playerLaserHitTimes[player]
-            if lastHit and now - lastHit < 1 then return end
-
-            -- One laser crossing causes one damage event, not one per body part.
-            playerLaserHitTimes[player] = now
-            pHum:TakeDamage(10)
-            currentSuspiciousNoise = { Position = laser.Position, Radius = 90, Timestamp = now }
-            local inv = playerInventories[player]
-            if inv then inventoryUpdatedEvent:FireClient(player, inv, "ТРЕВОГА: Пересечен лазер!") end
+    for stationName, stationPrompt in stationPrompts :: { [string]: ProximityPrompt } do
+        stationPrompt.Triggered:Connect(function(triggeringPlayer: Player)
+            if triggeringPlayer ~= player then return end
+            Remotes.OpenHideoutStation:FireClient(player, stationName)
         end)
     end
-end
 
--- ========================================================
--- 6. ОРУЖИЕ НА ПОЛУ
--- ========================================================
-local function SpawnGroundWeapon(spawnPos)
-    local weaponPart = Instance.new("Part")
-    weaponPart.Name = "TaserPickup"
-    weaponPart.Size = Vector3.new(1.8, 0.6, 1.2)
-    weaponPart.CFrame = CFrame.new(spawnPos)
-    weaponPart.Material = Enum.Material.Metal
-    weaponPart.Color = Color3.fromRGB(240, 200, 30)
-    weaponPart.Anchored = true
-    weaponPart.CanCollide = false
-    weaponPart.CastShadow = false
-    weaponPart.Parent = weaponsContainer
+    eliminatedPlayers[player] = false
+    player:SetAttribute("Eliminated", false)
 
-    local prompt = Instance.new("ProximityPrompt")
-    prompt.ActionText = "Взять"
-    prompt.ObjectText = "Тайзер охраны"
-    prompt.KeyboardKeyCode = Enum.KeyCode.E
-    prompt.HoldDuration = 0.2
-    prompt.MaxActivationDistance = 8
-    prompt.RequiresLineOfSight = false
-    prompt.Parent = weaponPart
+    LootService.InitPlayer(player)
+    LoadoutService.InitPlayer(player)
 
-    prompt.Triggered:Connect(function(player)
-        local backpack = player:FindFirstChild("Backpack")
-        if eliminatedPlayers[player] then return end
-        if not backpack
-            or backpack:FindFirstChild("Taser")
-            or (player.Character and player.Character:FindFirstChild("Taser"))
-        then
-            return
+    player.CharacterAdded:Connect(function(char: Model)
+        task.wait(0.2)
+        if Remotes.CurrentPhase.Value == "LobbyPhase" or eliminatedPlayers[player] then
+            char:PivotTo(getHideoutSpawn(player))
+        else
+            char:PivotTo(CFrame.new(0, 3, -65))
         end
 
-        local tool = Instance.new("Tool")
-        tool.Name = "Taser"
-        tool.RequiresHandle = true
-        tool.CanBeDropped = true
+        local hum = char:WaitForChild("Humanoid") :: Humanoid
+        local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
+        local activeLoadout = LoadoutService.GetActiveLoadout(player)
+        hum.WalkSpeed = activeLoadout.WalkSpeed
 
-        local handle = Instance.new("Part")
-        handle.Name = "Handle"
-        handle.Size = Vector3.new(1.4, 0.6, 1.0)
-        handle.Color = Color3.fromRGB(240, 200, 30)
-        handle.Material = Enum.Material.Metal
-        handle.Parent = tool
+        hum.Died:Connect(function()
+            local phase = Remotes.CurrentPhase.Value
+            local raidIsActive = RaidProgression.ShouldEliminate(phase)
 
-        tool.Parent = backpack
-        weaponPart:Destroy()
+            if raidIsActive and not CoopService.IsDowned(player) then
+                -- Во время рейда сначала отправляем игрока в нокаут для помощи от напарников
+                hum.Health = 1
+                CoopService.DownPlayer(player)
+            else
+                handlePlayerElimination(player, hrp.Position)
+            end
+        end)
 
-        local inv = playerInventories[player]
-        if inv then
-            inventoryUpdatedEvent:FireClient(player, inv, "Подобран шокер [ЛКМ чтобы выстрелить]")
-        end
+        local fallY = 0
+        local inFreefall = false
+
+        hum.StateChanged:Connect(function(_, new)
+            if new == Enum.HumanoidStateType.Freefall then
+                fallY = hrp.Position.Y
+                inFreefall = true
+            elseif new == Enum.HumanoidStateType.Landed and inFreefall then
+                inFreefall = false
+                local dropped = fallY - hrp.Position.Y
+                LootService.HandleFallDamage(player, dropped)
+            end
+        end)
     end)
+
+    task.spawn(loadCharacterForPlayer, player)
 end
 
--- ========================================================
--- 7. ВЫСТРЕЛ ТАЙЗЕРА И ДЫМ
--- ========================================================
-fireTaserEvent.OnServerEvent:Connect(function(player, targetPos)
-    if currentPhaseValue.Value ~= "LootPhase" or eliminatedPlayers[player] or not isFiniteVector3(targetPos) then return end
+-- Наблюдение за рейдом из убежища
+Remotes.GetRaidStatus.OnServerInvoke = function(requestingPlayer: Player)
+    local hideout = playerHideouts[requestingPlayer]
+    local character = requestingPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+    local commandZone = hideout and hideout.Model and hideout.Model:FindFirstChild("Command")
+    local commandConsole = commandZone and commandZone:FindFirstChild("MainStation") :: BasePart?
+
+    if not hideout or not hideout.Model or not hideout.Model.Parent
+        or not root or not commandConsole
+        or (root.Position - commandConsole.Position).Magnitude > 18 then
+        return {}
+    end
+
+    local result = {}
+    local phase = Remotes.CurrentPhase.Value
+    for _, targetPlayer in Players:GetPlayers() do
+        if targetPlayer ~= requestingPlayer then
+            local inventory = LootService.GetInventory(targetPlayer)
+            local targetChar = targetPlayer.Character
+            local humanoid = targetChar and targetChar:FindFirstChildOfClass("Humanoid")
+            local isAlive = humanoid ~= nil and humanoid.Health > 0
+            local escaped = inventory ~= nil and inventory.Escaped == true
+            local status = Locale.Get("StatusWaiting")
+            local canSpectate = false
+
+            if escaped then
+                status = Locale.Get("StatusEscaped")
+            elseif phase == "LootPhase" or phase == "ExtractionPhase" then
+                if isAlive then
+                    status = Locale.Get("StatusInRaid")
+                    canSpectate = true
+                else
+                    status = Locale.Get("StatusEliminated")
+                end
+            end
+
+            table.insert(result, {
+                UserId = targetPlayer.UserId,
+                DisplayName = targetPlayer.DisplayName,
+                Status = status,
+                CanSpectate = canSpectate,
+            })
+        end
+    end
+
+    table.sort(result, function(a, b) return a.DisplayName < b.DisplayName end)
+    return result
+end
+
+Remotes.GetRaidReplay.OnServerInvoke = function(player: Player)
+    return ReplayService.GetReplayDataForPlayer(player.UserId)
+end
+
+-- Действия игрока: Тайзер, Дым, Шум
+Remotes.FireTaser.OnServerEvent:Connect(function(player: Player, targetPos: any)
+    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
+    if typeof(targetPos) ~= "Vector3" then return end
     if not canPerformAction(player, "FireTaser", 1.0) then return end
 
     local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-    local tool = char and char:FindFirstChild("Taser")
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    local tool = char:FindFirstChild("Taser")
     if not hrp or not humanoid or humanoid.Health <= 0 or not tool then return end
 
     local direction = targetPos - hrp.Position
     if direction.Magnitude < 1 or direction.Magnitude > 50 then return end
 
-    -- Проверяем попадание трассировкой на сервере, а не по координате от клиента.
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = { char }
+    rayParams.FilterDescendantsInstances = { char :: Instance }
     local hit = workspace:Raycast(hrp.Position, direction, rayParams)
 
     local guard = workspace:FindFirstChild("GuardNPC")
     if guard and guard.PrimaryPart and hit and hit.Instance:IsDescendantOf(guard) then
-        guardStunnedUntil = os.clock() + 5.0
-        currentSuspiciousNoise = nil
-        local inv = playerInventories[player]
+        GuardAI.Stun(5.0)
+        local inv = LootService.GetInventory(player)
         if inv then
-            inventoryUpdatedEvent:FireClient(player, inv, "Охранник оглушен электрошоком на 5 секунд!")
+            Remotes.InventoryUpdated:FireClient(player, inv, Locale.Get("TaserStunSuccess"))
         end
     end
 
-    -- Валидный выстрел расходует тайзер даже при промахе.
     tool:Destroy()
 end)
 
-throwSmokeEvent.OnServerEvent:Connect(function(player)
-    if currentPhaseValue.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
+Remotes.ThrowSmoke.OnServerEvent:Connect(function(player: Player)
+    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
     if not canPerformAction(player, "ThrowSmoke", 10.0) then return end
 
     local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not humanoid or humanoid.Health <= 0 then return end
 
-    -- Точка дыма рассчитывается сервером; клиент не может размещать дым где угодно.
     local spawnPos = hrp.Position + hrp.CFrame.LookVector * 10
     local smokeCloud = Instance.new("Part")
     smokeCloud.Name = "SmokeCloud"
@@ -472,1124 +353,75 @@ throwSmokeEvent.OnServerEvent:Connect(function(player)
     end)
 end)
 
--- ========================================================
--- 8. ИНВЕНТАРЬ И ПОДБОР ЛУТА
--- ========================================================
-local function SendOwnedLoadouts(player)
-    loadoutsUpdatedEvent:FireClient(player, playerOwnedLoadouts[player] or { Default = true })
-end
-
-getOwnedLoadoutsFunction.OnServerInvoke = function(player)
-    return playerOwnedLoadouts[player] or { Default = true }
-end
-
-local function ApplyLoadoutToPlayer(player, loadout)
-    playerActiveLoadouts[player] = loadout
-    local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
-    local character = player.Character
-    if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = loadout.WalkSpeed
-        end
-    end
-    loadoutAppliedEvent:FireClient(player, loadout, upg)
-end
-
-local function SpawnLootItem(lootData, spawnPosition)
-    local itemPart = Instance.new("Part")
-    itemPart.Name = lootData.Name
-    itemPart.Size = Vector3.new(1.4, 1.4, 1.4)
-    itemPart.Material = Enum.Material.Neon
-    itemPart.Color = lootData.Color
-    itemPart.CFrame = CFrame.new(spawnPosition)
-    itemPart.Anchored = false
-    itemPart.CanCollide = true
-    itemPart.CastShadow = false
-    itemPart.Parent = lootContainer
-
-    local prompt = Instance.new("ProximityPrompt")
-    prompt.ActionText = "Взять"
-    prompt.ObjectText = string.format("%s ($%d | %.1f кг)", lootData.Name, lootData.Value, lootData.Weight)
-    prompt.KeyboardKeyCode = Enum.KeyCode.E
-    prompt.HoldDuration = 0.2
-    prompt.MaxActivationDistance = 10
-    prompt.RequiresLineOfSight = false
-    prompt.Parent = itemPart
-
-    prompt.Triggered:Connect(function(player)
-        local inv = playerInventories[player]
-        local currentLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
-        local upg = playerUpgrades[player] or { Pockets = 0 }
-        local effectiveMaxWeight = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, upg.Pockets)
-        if not inv or inv.Escaped or eliminatedPlayers[player] then return end
-
-        if not LootLogic.CanAddItem(inv.TotalWeight, lootData.Weight, effectiveMaxWeight) then
-            inventoryUpdatedEvent:FireClient(player, inv, "Рюкзак переполнен!")
-            return
-        end
-
-        table.insert(inv.Items, lootData)
-        inv.TotalWeight += lootData.Weight
-        inv.TotalValue += lootData.Value
-
-        local character = player.Character
-        if character then
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.WalkSpeed = LootLogic.CalculateWalkSpeed(inv.TotalWeight, effectiveMaxWeight, currentLoadout.WalkSpeed, Config.MinWalkSpeed)
-            end
-        end
-
-        itemPart:Destroy()
-        inventoryUpdatedEvent:FireClient(player, inv, string.format("+%s ($%d)", lootData.Name, lootData.Value))
-    end)
-end
-
-dropItemEvent.OnServerEvent:Connect(function(player, itemIndex)
-    local inv = playerInventories[player]
-    if not inv or inv.Escaped or eliminatedPlayers[player] then return end
-
-    -- RemoteEvent arguments are controlled by the client: accept only a valid array index.
-    if typeof(itemIndex) ~= "number"
-        or itemIndex ~= itemIndex
-        or itemIndex % 1 ~= 0
-        or itemIndex < 1
-        or itemIndex > #inv.Items then
-        return
-    end
-
-    -- Do not remove the item unless the server can place it back into the world.
-    local character = player.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or humanoid.Health <= 0 or not hrp then return end
-
-    local currentLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
-    local upg = playerUpgrades[player] or { Pockets = 0 }
-    local effectiveMaxWeight = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, upg.Pockets)
-
-    local droppedItem = table.remove(inv.Items, itemIndex)
-    inv.TotalWeight -= droppedItem.Weight
-    inv.TotalValue -= droppedItem.Value
-    humanoid.WalkSpeed = LootLogic.CalculateWalkSpeed(
-        inv.TotalWeight,
-        effectiveMaxWeight,
-        currentLoadout.WalkSpeed,
-        Config.MinWalkSpeed
-    )
-    SpawnLootItem(droppedItem, hrp.Position + hrp.CFrame.LookVector * 3)
-
-    inventoryUpdatedEvent:FireClient(player, inv, string.format("Выброшено: %s", droppedItem.Name))
-end)
-
-local function GetHideoutSpawn(player)
-    local hideout = playerHideouts[player]
-    return hideout and hideout.SpawnCFrame or CFrame.new(0, 123, 0)
-end
-
-local function AllocateHideoutSlot(player)
-    for slot = 1, math.max(Players.MaxPlayers, 1) do
-        if not hideoutSlotOwners[slot] then
-            hideoutSlotOwners[slot] = player
-            playerHideoutSlots[player] = slot
-            return slot
-        end
-    end
-    -- Server capacity is normally bounded by MaxPlayers; this fallback avoids a nil slot.
-    local slot = Players.MaxPlayers + 1
-    while hideoutSlotOwners[slot] do slot += 1 end
-    hideoutSlotOwners[slot] = player
-    playerHideoutSlots[player] = slot
-    return slot
-end
-
-local function SavePlayerData(player)
-    if not dataStoreAvailable then return false end
-
-    -- Wait for an earlier save to finish before taking a new data snapshot.
-    while playerSaveInProgress[player] do
-        task.wait(0.05)
-    end
-
-    -- Recheck after waiting: the player may have started leaving meanwhile.
-    if not playerDataLoaded[player] then
-        warn(string.format("[DataStore] Пропуск сохранения %s: данные не были успешно загружены.", player.Name))
-        return false
-    end
-
-    playerSaveInProgress[player] = true
-
-    local leaderstats = player:FindFirstChild("leaderstats")
-    local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-    if not cash then
-        playerSaveInProgress[player] = nil
-        return false
-    end
-
-    local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
-    local raidsStat = leaderstats:FindFirstChild("Raids")
-    local streakStat = leaderstats:FindFirstChild("Streak")
-    local ownedLoadouts = { Default = true }
-    for _, loadout in ipairs(Config.Loadouts) do
-        if loadout.Cost > 0 and playerOwnedLoadouts[player] and playerOwnedLoadouts[player][loadout.Id] == true then
-            ownedLoadouts[loadout.Id] = true
-        end
-    end
-
-    local normalizedStats = RaidProgression.NormalizeStats(
-        raidsStat and raidsStat.Value or 0,
-        streakStat and streakStat.Value or 0
-    )
-    local dataToSave = {
-        Cash = math.max(0, math.floor(cash.Value)),
-        Raids = normalizedStats.Raids,
-        Streak = normalizedStats.Streak,
-        OwnedLoadouts = ownedLoadouts,
-        Hideout = {
-            Version = 1,
-            Level = math.clamp(math.floor((playerHideouts[player] and playerHideouts[player].Data.Level) or 1), 1, 10),
-        },
-        Upgrades = {
-            Pockets = math.clamp(math.floor(upg.Pockets or 0), 0, 3),
-            SmokeStarter = math.clamp(math.floor(upg.SmokeStarter or 0), 0, 2),
-            Battery = math.clamp(math.floor(upg.Battery or 0), 0, 3),
-        }
-    }
-
-    local success, err = pcall(function()
-        PlayerDataStore:UpdateAsync("Player_" .. player.UserId, function()
-            return dataToSave
-        end)
-    end)
-
-    -- Always release the per-player lock, including after a DataStore error.
-    playerSaveInProgress[player] = nil
-
-    if not success then
-        warn(string.format("[DataStore] Не удалось сохранить данные %s: %s", player.Name, tostring(err)))
-        return false
-    end
-
-    return true
-end
-
-buyUpgradeEvent.OnServerEvent:Connect(function(player, upgradeKey)
-    local leaderstats = player:FindFirstChild("leaderstats")
-    local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-    if not cash then return end
-
-    local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
-    local currentLvl = upg[upgradeKey] or 0
-
-    local canBuy, newCash, newLvl = LootLogic.CanPurchaseUpgrade(cash.Value, upgradeKey, currentLvl)
-    if canBuy then
-        cash.Value = newCash
-        upg[upgradeKey] = newLvl
-        playerUpgrades[player] = upg
-        SavePlayerData(player)
-
-        local curLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
-        ApplyLoadoutToPlayer(player, curLoadout)
-
-        upgradesUpdatedEvent:FireClient(player, upg, false)
-        local inv = playerInventories[player]
-        if inv then inventoryUpdatedEvent:FireClient(player, inv, string.format("Куплено: %s (Ур. %d)!", LootLogic.UpgradesConfig[upgradeKey].Name, newLvl)) end
-    end
-end)
-
-selectLoadoutEvent.OnServerEvent:Connect(function(player, loadoutId)
-    if type(loadoutId) ~= "string" or #loadoutId > 32 then return end
-
-    local targetLoadout = nil
-    for _, loadout in ipairs(Config.Loadouts) do
-        if loadout.Id == loadoutId then
-            targetLoadout = loadout
-            break
-        end
-    end
-    if not targetLoadout then return end
-
-    local owned = playerOwnedLoadouts[player]
-    if not owned then return end
-
-    if not owned[targetLoadout.Id] then
-        if not TEST_MODE then
-            local leaderstats = player:FindFirstChild("leaderstats")
-            local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-            if not cash then return end
-
-            local canBuy, newCash = LootLogic.CanAffordLoadout(cash.Value, targetLoadout.Cost)
-            if not canBuy then
-                inventoryUpdatedEvent:FireClient(player, playerInventories[player], "Недостаточно средств для покупки комплекта.")
-                return
-            end
-
-            cash.Value = newCash
-        end
-
-        owned[targetLoadout.Id] = true
-        if not SavePlayerData(player) and not TEST_MODE then
-            -- In production, never grant a purchase that could not be persisted.
-            owned[targetLoadout.Id] = nil
-            local leaderstats = player:FindFirstChild("leaderstats")
-            local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-            if cash then cash.Value += targetLoadout.Cost end
-            SendOwnedLoadouts(player)
-            return
-        end
-    end
-
-    ApplyLoadoutToPlayer(player, targetLoadout)
-    SendOwnedLoadouts(player)
-    local inv = playerInventories[player]
-    if inv then inventoryUpdatedEvent:FireClient(player, inv, string.format("Экипирован комплект: %s!", targetLoadout.Name)) end
-end)
-
-local function InitPlayer(player)
-    local leaderstats = Instance.new("Folder")
-    leaderstats.Name = "leaderstats"
-    leaderstats.Parent = player
-
-    local cash = Instance.new("IntValue")
-    cash.Name = "Cash"
-    cash.Value = 0
-    cash.Parent = leaderstats
-
-    local raids = Instance.new("IntValue")
-    raids.Name = "Raids"
-    raids.Value = 0
-    raids.Parent = leaderstats
-
-    local streak = Instance.new("IntValue")
-    streak.Name = "Streak"
-    streak.Value = 0
-    streak.Parent = leaderstats
-
-    playerUpgrades[player] = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
-    playerOwnedLoadouts[player] = { Default = true }
-    playerDataLoaded[player] = false
-    local loadedPlayerData = nil
-
-    if dataStoreAvailable then
-        local key = "Player_" .. player.UserId
-        local success, savedData = pcall(function()
-            return PlayerDataStore:GetAsync(key)
-        end)
-
-        if success then
-            loadedPlayerData = savedData
-            -- Успешный GetAsync без записи означает нового игрока, это тоже валидное состояние.
-            playerDataLoaded[player] = true
-            if type(savedData) == "table" then
-                if type(savedData.Cash) == "number" and savedData.Cash == savedData.Cash then
-                    cash.Value = math.clamp(math.floor(savedData.Cash), 0, 2000000000)
-                end
-
-                local normalizedStats = RaidProgression.NormalizeStats(savedData.Raids, savedData.Streak)
-                raids.Value = normalizedStats.Raids
-                streak.Value = normalizedStats.Streak
-
-                local savedOwnedLoadouts = savedData.OwnedLoadouts
-                if type(savedOwnedLoadouts) == "table" then
-                    local owned = { Default = true }
-                    for _, loadout in ipairs(Config.Loadouts) do
-                        if loadout.Cost > 0 and savedOwnedLoadouts[loadout.Id] == true then
-                            owned[loadout.Id] = true
-                        end
-                    end
-                    playerOwnedLoadouts[player] = owned
-                end
-
-                local savedUpgrades = savedData.Upgrades
-                if type(savedUpgrades) == "table" then
-                    playerUpgrades[player] = {
-                        Pockets = type(savedUpgrades.Pockets) == "number"
-                            and math.clamp(math.floor(savedUpgrades.Pockets), 0, 3) or 0,
-                        SmokeStarter = type(savedUpgrades.SmokeStarter) == "number"
-                            and math.clamp(math.floor(savedUpgrades.SmokeStarter), 0, 2) or 0,
-                        Battery = type(savedUpgrades.Battery) == "number"
-                            and math.clamp(math.floor(savedUpgrades.Battery), 0, 3) or 0,
-                    }
-                end
-            elseif type(savedData) == "number" then
-                cash.Value = math.clamp(math.floor(savedData), 0, 2000000000)
-            end
-        else
-            -- Не сохраняем нулевые значения поверх старых данных при временной ошибке чтения.
-            warn(string.format("[DataStore] Не удалось загрузить данные %s: %s", player.Name, tostring(savedData)))
-        end
-    end
-
-    local savedHideout = nil
-    if type(loadedPlayerData) == "table" and type(loadedPlayerData.Hideout) == "table" then
-        savedHideout = {
-            Version = 1,
-            Level = type(loadedPlayerData.Hideout.Level) == "number"
-                and math.clamp(math.floor(loadedPlayerData.Hideout.Level), 1, 10) or 1,
-        }
-    end
-    local slot = AllocateHideoutSlot(player)
-    local hideoutData = savedHideout or { Version = 1, Level = 1 }
-    local hideoutModel, spawnCFrame, dealerPrompt, stationPrompts = HideoutBuilder.Build(player.UserId, slot, hideoutData)
-    playerHideouts[player] = {
-        Model = hideoutModel,
-        SpawnCFrame = spawnCFrame,
-        Data = hideoutData,
-    }
-    dealerPrompt.Triggered:Connect(function(triggeringPlayer)
-        if triggeringPlayer ~= player then return end
-        local upg = playerUpgrades[player] or { Pockets = 0, SmokeStarter = 0, Battery = 0 }
-        upgradesUpdatedEvent:FireClient(player, upg, true)
-    end)
-
-    for stationName, stationPrompt in stationPrompts do
-        stationPrompt.Triggered:Connect(function(triggeringPlayer)
-            print("[HideoutStation][SERVER] Triggered:", stationName, "By:", triggeringPlayer.Name, "Owner:", player.Name, "Phase:", currentPhaseValue.Value)
-            if triggeringPlayer ~= player then
-                warn("[HideoutStation][SERVER] Rejected: not the hideout owner")
-                return
-            end
-            -- Hideout stations are personal and can be used while other players
-            -- are still in the raid. The owner check above protects this interaction.
-            print("[HideoutStation][SERVER] Sending OpenHideoutStation:", stationName)
-            openHideoutStationEvent:FireClient(player, stationName)
-        end)
-    end
-
-    playerInventories[player] = { TotalValue = 0, TotalWeight = 0, Items = {}, Escaped = false }
-    eliminatedPlayers[player] = false
-    player:SetAttribute("Eliminated", false)
-    ApplyLoadoutToPlayer(player, Config.Loadouts[1])
-    SendOwnedLoadouts(player)
-
-    player.CharacterAdded:Connect(function(char)
-        task.wait(0.2)
-        if currentPhaseValue.Value == "LobbyPhase" or eliminatedPlayers[player] then
-            char:PivotTo(GetHideoutSpawn(player))
-        else
-            char:PivotTo(CFrame.new(0, 3, -65))
-        end
-
-        local hum = char:WaitForChild("Humanoid")
-        local hrp = char:WaitForChild("HumanoidRootPart")
-        local activeLoadout = playerActiveLoadouts[player] or Config.Loadouts[1]
-        hum.WalkSpeed = activeLoadout.WalkSpeed
-
-        hum.Died:Connect(function()
-            local inv = playerInventories[player]
-            local phase = currentPhaseValue.Value
-            local raidIsActive = RaidProgression.ShouldEliminate(phase)
-
-            -- Elimination is independent from inventory contents and extraction state.
-            if raidIsActive then
-                eliminatedPlayers[player] = true
-                player:SetAttribute("Eliminated", true)
-            end
-            extractingPlayers[player] = nil
-
-            if inv and RaidProgression.ShouldDropLoot(phase, inv.Escaped, #inv.Items) then
-                -- Copy the server-owned inventory before clearing it.
-                local droppedItems = LootLogic.GetDeathDropItems(inv.Items)
-                local deathPosition = hrp.Position
-                for index, item in ipairs(droppedItems) do
-                    local angle = (index / math.max(#droppedItems, 1)) * math.pi * 2
-                    local offset = Vector3.new(math.cos(angle) * 3, 1.5, math.sin(angle) * 3)
-                    SpawnLootItem(item, deathPosition + offset)
-                end
-
-                local lostValue = inv.TotalValue
-                inv.Items = {}
-                inv.TotalWeight = 0
-                inv.TotalValue = 0
-                inventoryUpdatedEvent:FireClient(
-                    player,
-                    inv,
-                    string.format("Вы выбыли из рейда! Потеряна добыча на сумму $%d.", lostValue)
-                )
-            elseif inv then
-                inventoryUpdatedEvent:FireClient(player, inv, "Вы выбыли из рейда.")
-            end
-
-            -- CharacterAutoLoads is disabled, so explicitly respawn after the death
-            -- animation. CharacterAdded routes eliminated players to their hideout.
-            task.delay(2, function()
-                if player.Parent == Players and player.Character == char then
-                    LoadCharacterForPlayer(player)
-                end
-            end)
-        end)
-
-        local fallY = 0
-        local inFreefall = false
-
-        hum.StateChanged:Connect(function(old, new)
-            if new == Enum.HumanoidStateType.Freefall then
-                fallY = hrp.Position.Y
-                inFreefall = true
-            elseif new == Enum.HumanoidStateType.Landed and inFreefall then
-                inFreefall = false
-                local dropped = fallY - hrp.Position.Y
-                if dropped > 14 then
-                    local inv = playerInventories[player]
-                    if inv then
-                        local remItems, brokenItems, newW, newV = LootLogic.ProcessFallDamage(inv.Items, dropped, 14)
-                        inv.Items = remItems
-                        inv.TotalWeight = newW
-                        inv.TotalValue = newV
-
-                        for _, broken in ipairs(brokenItems) do
-                            inventoryUpdatedEvent:FireClient(player, inv, string.format("ВАШ ПРЕДМЕТ РАЗБИЛСЯ: %s!", broken.Name))
-                        end
-                    end
-                end
-            end
-        end)
-    end)
-
-    -- With automatic respawning disabled, explicitly spawn the first character.
-    task.spawn(LoadCharacterForPlayer, player)
-end
-
-getRaidStatusFunction.OnServerInvoke = function(requestingPlayer)
-    local hideout = playerHideouts[requestingPlayer]
-    local character = requestingPlayer.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    local commandZone = hideout and hideout.Model and hideout.Model:FindFirstChild("Command")
-    local commandConsole = commandZone and commandZone:FindFirstChild("MainStation")
-
-    -- Require the caller to be physically at their own command console.
-    if not hideout or not hideout.Model or not hideout.Model.Parent
-        or not root or not commandConsole
-        or (root.Position - commandConsole.Position).Magnitude > 18 then
-        return {}
-    end
-
-    local result = {}
-    local phase = currentPhaseValue.Value
-    for _, targetPlayer in Players:GetPlayers() do
-        if targetPlayer ~= requestingPlayer then
-            local inventory = playerInventories[targetPlayer]
-            local character = targetPlayer.Character
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            local isAlive = humanoid ~= nil and humanoid.Health > 0
-            local escaped = inventory ~= nil and inventory.Escaped == true
-            local status = "Ожидает начала рейда"
-            local canSpectate = false
-
-            if escaped then
-                status = "Эвакуировался"
-            elseif phase == "LootPhase" or phase == "ExtractionPhase" then
-                if isAlive then
-                    status = "В рейде"
-                    canSpectate = true
-                else
-                    status = "Выбыл"
-                end
-            end
-
-            table.insert(result, {
-                UserId = targetPlayer.UserId,
-                DisplayName = targetPlayer.DisplayName,
-                Status = status,
-                CanSpectate = canSpectate,
-            })
-        end
-    end
-
-    table.sort(result, function(a, b)
-        return a.DisplayName < b.DisplayName
-    end)
-    return result
-end
-
-Players.PlayerAdded:Connect(InitPlayer)
-Players.PlayerRemoving:Connect(function(player)
-    SavePlayerData(player)
-    local hideout = playerHideouts[player]
-    if hideout and hideout.Model then hideout.Model:Destroy() end
-    local slot = playerHideoutSlots[player]
-    if slot then hideoutSlotOwners[slot] = nil end
-    playerHideouts[player] = nil
-    playerHideoutSlots[player] = nil
-    playerInventories[player] = nil
-    playerActiveLoadouts[player] = nil
-    playerOwnedLoadouts[player] = nil
-    playerUpgrades[player] = nil
-    playerDataLoaded[player] = nil
-    remoteActionTimes[player] = nil
-    playerLaserHitTimes[player] = nil
-    eliminatedPlayers[player] = nil
-    extractingPlayers[player] = nil
-end)
-
-for _, p in Players:GetPlayers() do InitPlayer(p) end
-
-makeNoiseEvent.OnServerEvent:Connect(function(player)
-    if currentPhaseValue.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
+Remotes.MakeNoise.OnServerEvent:Connect(function(player: Player)
+    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
     if not canPerformAction(player, "MakeNoise", 0.75) then return end
 
     local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not humanoid or humanoid.Health <= 0 then return end
 
-    -- Координаты и радиус задаёт сервер, а не клиент.
-    currentSuspiciousNoise = {
-        Position = hrp.Position,
-        Radius = 40,
-        Timestamp = os.clock()
-    }
+    GuardAI.RegisterNoise(hrp.Position, 40)
 end)
 
--- ========================================================
--- 9. ИИ ОХРАННИКА
--- ========================================================
-local function CreateGuardNPC(spawnPos)
-    local oldGuard = workspace:FindFirstChild("GuardNPC")
-    if oldGuard then oldGuard:Destroy() end
-    guardAlertUntil = 0
-
-    local model = Instance.new("Model")
-    model.Name = "GuardNPC"
-
-    local root = Instance.new("Part")
-    root.Name = "HumanoidRootPart"
-    root.Size = Vector3.new(2.4, 5, 2.4)
-    root.Color = Color3.fromRGB(25, 28, 35)
-    root.Material = Enum.Material.Metal
-    root.CFrame = CFrame.new(spawnPos)
-    root.CanCollide = true
-    root.CastShadow = false
-    root.Parent = model
-    model.PrimaryPart = root
-
-    local head = Instance.new("Part")
-    head.Name = "Head"
-    head.Size = Vector3.new(1.4, 1.4, 1.4)
-    head.Color = Color3.fromRGB(255, 60, 60)
-    head.Material = Enum.Material.Neon
-    head.CFrame = root.CFrame * CFrame.new(0, 2.5, -0.3)
-    head.CanCollide = false
-    head.CastShadow = false
-    head.Parent = model
-
-    local weld = Instance.new("WeldConstraint")
-    weld.Part0 = root
-    weld.Part1 = head
-    weld.Parent = head
-
-    local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(0, 140, 0, 30)
-    bb.StudsOffset = Vector3.new(0, 3.2, 0)
-    bb.AlwaysOnTop = true
-    bb.Parent = head
-
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, 0, 1, 0)
-    statusLabel.Text = "[ПАТРУЛЬ]"
-    statusLabel.TextColor3 = Color3.fromRGB(255, 170, 0)
-    statusLabel.Font = Enum.Font.GothamBlack
-    statusLabel.TextSize = 13
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Parent = bb
-
-    local light = Instance.new("SpotLight")
-    light.Range = 55
-    light.Angle = 70
-    light.Brightness = 8.5
-    light.Color = Color3.fromRGB(255, 140, 40)
-    light.Face = Enum.NormalId.Front
-    light.Shadows = false
-    light.Parent = head
-
-    local humanoid = Instance.new("Humanoid")
-    humanoid.MaxHealth = 300
-    humanoid.Health = 300
-    humanoid.WalkSpeed = 14
-    humanoid.Parent = model
-
-    model.Parent = workspace
-
-    local waypoints = {
-        Vector3.new(-45, 3, -45),
-        Vector3.new(45, 3, -45),
-        Vector3.new(50, 3, -15),
-        Vector3.new(45, 3, 45),
-        Vector3.new(-45, 3, 45),
-        Vector3.new(0, 3, 0)
-    }
-    local currentWaypointIndex = 1
-    local currentState = "Patrol"
-    local investigateTarget = nil
-    local lastKnownPlayerPosition = nil
-    local searchStartedAt = nil
-    local searchMoveIssued = false
-    local SEARCH_DURATION = 7
-
-    local function NavigateTo(dest)
-        local path = PathfindingService:CreatePath({ AgentRadius = 2.5, AgentHeight = 5, AgentCanJump = false })
-        local success = pcall(function() path:ComputeAsync(root.Position, dest) end)
-        if success and path.Status == Enum.PathStatus.Success then
-            local points = path:GetWaypoints()
-            for i = 2, math.min(#points, 4) do
-                if not model.Parent or humanoid.Health <= 0 then break end
-                humanoid:MoveTo(points[i].Position)
-                task.wait(0.35)
-            end
-        else
-            humanoid:MoveTo(dest)
-            task.wait(0.35)
+-- Подключение игроков
+Players.PlayerAdded:Connect(InitPlayer)
+Players.PlayerRemoving:Connect(function(player: Player)
+    -- Если игрок вышел во время рейда с лутом, дропаем его на месте выхода для напарников
+    local phase = Remotes.CurrentPhase.Value
+    if (phase == "LootPhase" or phase == "ExtractionPhase") and not isPlayerEliminated(player) then
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local pos = hrp and hrp.Position or Vector3.new(0, 3, 0)
+        local inv = LootService.GetInventory(player)
+        if inv and #inv.Items > 0 then
+            LootService.HandlePlayerDeath(player, pos, true)
         end
     end
 
-    task.spawn(function()
-        while model.Parent and humanoid.Health > 0 do
-            task.wait(0.15)
-
-            if os.clock() < guardStunnedUntil then
-                statusLabel.Text = "[ОГЛУШЁН ЭЛЕКТРОШОКОМ]"
-                statusLabel.TextColor3 = Color3.fromRGB(0, 220, 255)
-                light.Color = Color3.fromRGB(0, 180, 255)
-                humanoid.WalkSpeed = 0
-                continue
-            end
-
-            local inSmoke = false
-            local smokePositions = {}
-            for _, smoke in smokesContainer:GetChildren() do
-                if smoke:IsA("BasePart") then
-                    table.insert(smokePositions, smoke.Position)
-                    if (root.Position - smoke.Position).Magnitude <= 14 then
-                        inSmoke = true
-                    end
-                end
-            end
-
-            if inSmoke then
-                statusLabel.Text = "[ОСЛЕПЛЕН ДЫМОМ]"
-                statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-                light.Color = Color3.fromRGB(120, 120, 120)
-                humanoid.WalkSpeed = 5
-                task.wait(0.5)
-                continue
-            end
-
-            local isAlerted = os.clock() < guardAlertUntil
-            local awareness = NightEvents.ApplyToAwareness(
-                LootLogic.GetGuardAwareness(isAlerted),
-                activeNightEvent
-            )
-
-            local targetChar = nil
-            for _, player in Players:GetPlayers() do
-                local char = player.Character
-                local playerRoot = char and char:FindFirstChild("HumanoidRootPart")
-                local playerHumanoid = char and char:FindFirstChildOfClass("Humanoid")
-
-                if playerRoot and playerHumanoid and playerHumanoid.Health > 0
-                    and not eliminatedPlayers[player]
-                    and not (playerInventories[player] and playerInventories[player].Escaped) then
-                    local smokeBlocksVision = LootLogic.IsVisionBlockedBySmoke(
-                        smokePositions, root.Position, playerRoot.Position, 14
-                    )
-                    if not smokeBlocksVision
-                        and LootLogic.IsPlayerDetected(
-                            root.Position,
-                            root.CFrame.LookVector,
-                            playerRoot.Position,
-                            awareness.ViewDistance,
-                            awareness.FovDotThreshold,
-                            12
-                        ) then
-                        local rayParams = RaycastParams.new()
-                        rayParams.FilterDescendantsInstances = { model, char, smokesContainer }
-                        rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                        local hit = workspace:Raycast(root.Position, playerRoot.Position - root.Position, rayParams)
-                        if not hit then
-                            targetChar = char
-                            lastKnownPlayerPosition = playerRoot.Position
-                            break
-                        end
-                    end
-                end
-            end
-
-            if targetChar then
-                guardAlertUntil = math.max(guardAlertUntil, os.clock() + 12)
-                currentState = "Chase"
-                searchStartedAt = nil
-                searchMoveIssued = false
-                statusLabel.Text = "[ТРЕВОГА: ПОГОНЯ]"
-                statusLabel.TextColor3 = Color3.fromRGB(255, 30, 30)
-                light.Color = Color3.fromRGB(255, 0, 0)
-                humanoid.WalkSpeed = 20.5 * (activeNightEvent.GuardSpeedMultiplier or 1)
-                humanoid:MoveTo(targetChar.HumanoidRootPart.Position)
-                if (targetChar.HumanoidRootPart.Position - root.Position).Magnitude <= 5 then
-                    local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
-                    if targetHumanoid then
-                        targetHumanoid:TakeDamage(25)
-                        task.wait(0.5)
-                    end
-                end
-            else
-                if currentState == "Chase" and lastKnownPlayerPosition then
-                    currentState = "Search"
-                    searchStartedAt = os.clock()
-                    searchMoveIssued = false
-                end
-
-                if currentState ~= "Search" and currentSuspiciousNoise
-                    and (os.clock() - currentSuspiciousNoise.Timestamp) < 6
-                    and LootLogic.IsNoiseAudible(root.Position, currentSuspiciousNoise.Position, currentSuspiciousNoise.Radius) then
-                    guardAlertUntil = math.max(guardAlertUntil, os.clock() + 12)
-                    currentState = "Investigate"
-                    investigateTarget = currentSuspiciousNoise.Position
-                    currentSuspiciousNoise = nil
-                end
-
-                if currentState == "Search" and lastKnownPlayerPosition then
-                    statusLabel.Text = isAlerted and "[ТРЕВОГА: ПОИСК]" or "[ПОИСК ИГРОКА]"
-                    statusLabel.TextColor3 = isAlerted and Color3.fromRGB(255, 90, 30) or Color3.fromRGB(255, 220, 30)
-                    light.Color = isAlerted and Color3.fromRGB(255, 70, 20) or Color3.fromRGB(255, 200, 20)
-                    humanoid.WalkSpeed = awareness.SearchSpeed
-                    if not searchMoveIssued then
-                        searchMoveIssued = true
-                        NavigateTo(lastKnownPlayerPosition)
-                    end
-                    local searchElapsed = os.clock() - searchStartedAt
-                    if (root.Position - lastKnownPlayerPosition).Magnitude <= 8 then
-                        if searchElapsed < SEARCH_DURATION then
-                            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, searchElapsed * math.rad(100), 0)
-                        else
-                            currentState = "Patrol"
-                            lastKnownPlayerPosition = nil
-                            searchStartedAt = nil
-                            searchMoveIssued = false
-                        end
-                    elseif searchElapsed >= SEARCH_DURATION then
-                        currentState = "Patrol"
-                        lastKnownPlayerPosition = nil
-                        searchStartedAt = nil
-                        searchMoveIssued = false
-                    end
-                elseif currentState == "Investigate" and investigateTarget then
-                    statusLabel.Text = isAlerted and "[ТРЕВОГА: ШУМ]" or "[ПОИСК ШУМА]"
-                    statusLabel.TextColor3 = isAlerted and Color3.fromRGB(255, 90, 30) or Color3.fromRGB(255, 230, 0)
-                    light.Color = isAlerted and Color3.fromRGB(255, 70, 20) or Color3.fromRGB(255, 220, 30)
-                    humanoid.WalkSpeed = awareness.InvestigateSpeed
-                    NavigateTo(investigateTarget)
-                    if (root.Position - investigateTarget).Magnitude <= 8 then
-                        task.wait(0.8)
-                        currentState = "Patrol"
-                        investigateTarget = nil
-                    end
-                else
-                    currentState = "Patrol"
-                    statusLabel.Text = isAlerted and "[ПОВЫШЕННАЯ ГОТОВНОСТЬ]" or "[ПАТРУЛИРОВАНИЕ]"
-                    statusLabel.TextColor3 = isAlerted and Color3.fromRGB(255, 100, 30) or Color3.fromRGB(255, 160, 50)
-                    light.Color = isAlerted and Color3.fromRGB(255, 70, 20) or Color3.fromRGB(255, 140, 40)
-                    humanoid.WalkSpeed = awareness.PatrolSpeed
-                    local dest = waypoints[currentWaypointIndex]
-                    NavigateTo(dest)
-                    if (root.Position - dest).Magnitude <= 7 then
-                        currentWaypointIndex = (currentWaypointIndex % #waypoints) + 1
-                        task.wait(0.5)
-                    end
-                end
-            end
-        end
-    end)
-
-    return model
-end
-
--- ========================================================
--- 10. ЭВАКУАЦИЯ И ЦИКЛ РАУНДОВ
--- ========================================================
-local function CreateExtractionZone()
-    local oldZone = workspace:FindFirstChild("ExtractionZone")
-    if oldZone then oldZone:Destroy() end
-
-    local zone = Instance.new("Part")
-    zone.Name = "ExtractionZone"
-    zone.Size = Vector3.new(22, 8, 22)
-    zone.Position = Vector3.new(0, 4, 70)
-    zone.Anchored = true
-    zone.CanCollide = false
-    zone.CanQuery = false
-    zone.CanTouch = true
-    zone.Material = Enum.Material.ForceField
-    zone.Color = Color3.fromRGB(0, 255, 140)
-    zone.Transparency = 0.5
-    zone.CastShadow = false
-    zone.Parent = workspace
-
-    local pad = Instance.new("Part")
-    pad.Name = "ExtractionPad"
-    pad.Size = Vector3.new(22, 0.4, 22)
-    pad.Position = Vector3.new(0, 0.2, 70)
-    pad.Anchored = true
-    pad.CanCollide = true
-    pad.Material = Enum.Material.DiamondPlate
-    pad.Color = Color3.fromRGB(40, 45, 55)
-    pad.CastShadow = false
-    pad.Parent = zone
-
-    return zone
-end
-
-local function SetFacilityLampsEnabled(enabled: boolean)
-    local facility = workspace:FindFirstChild("HeistFacility")
-    if not facility then return end
-    for _, descendant in facility:GetDescendants() do
-        if descendant:IsA("PointLight") then
-            descendant.Enabled = enabled
-        end
-    end
-end
-
-local function ApplyNightEvent(event)
-    activeNightEvent = event
-    currentNightEventValue.Value = event.Name
-
-    if event.Darkness then
-        Lighting.Ambient = Color3.fromRGB(8, 9, 12)
-        Lighting.OutdoorAmbient = Color3.fromRGB(8, 9, 12)
-        Lighting.FogEnd = 110
-        SetFacilityLampsEnabled(false)
-    end
-
-    nightEventEvent:FireAllClients(event.Id, event.Name, event.Description)
-end
-
-local function ClearNightEvent()
-    activeNightEvent = NightEvents.None
-    currentNightEventValue.Value = ""
-    Lighting.Ambient = BASE_AMBIENT
-    Lighting.OutdoorAmbient = BASE_OUTDOOR_AMBIENT
-    Lighting.FogEnd = BASE_FOG_END
-    SetFacilityLampsEnabled(true)
-end
-
-local raidStartRequested = false
-
-startRaidEvent.OnServerEvent:Connect(function(player)
-    if currentPhaseValue.Value ~= "LobbyPhase" or raidStartRequested then return end
+    CoopService.ClearDowned(player)
+    DataService.RemovePlayer(player)
 
     local hideout = playerHideouts[player]
-    local character = player.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if not hideout or not root or not humanoid or humanoid.Health <= 0 then return end
+    if hideout and hideout.Model then hideout.Model:Destroy() end
 
-    -- The start button is valid only while the player is close to their own hideout spawn.
-    if (root.Position - hideout.SpawnCFrame.Position).Magnitude > 45 then
-        warn("[Raid] Start rejected: player is not inside their hideout")
-        return
-    end
+    local slot = playerHideoutSlots[player]
+    if slot then hideoutSlotOwners[slot] = nil end
 
-    raidStartRequested = true
-    print("[Raid] Start requested by", player.Name)
+    playerHideouts[player] = nil
+    playerHideoutSlots[player] = nil
+    eliminatedPlayers[player] = nil
+    remoteActionTimes[player] = nil
+
+    LootService.RemovePlayer(player)
+    LoadoutService.RemovePlayer(player)
 end)
 
-local function ResetPlayersForRound()
-    for player, inv in playerInventories do
-        eliminatedPlayers[player] = false
-        player:SetAttribute("Eliminated", false)
-        inv.TotalValue = 0
-        inv.TotalWeight = 0
-        inv.Items = {}
-        inv.Escaped = false
-        ApplyLoadoutToPlayer(player, playerActiveLoadouts[player] or Config.Loadouts[1])
-        inventoryUpdatedEvent:FireClient(player, inv, "Новый рейд! Загляните к Скупщику в убежище.")
-
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then
-            task.spawn(LoadCharacterForPlayer, player)
-        end
-    end
+for _, p in Players:GetPlayers() do
+    InitPlayer(p)
 end
 
-task.spawn(function()
-    while true do
-        -- Switch to the lobby before respawning eliminated players so their
-        -- CharacterAdded handler sends them to their personal hideout.
-        currentPhaseValue.Value = "LobbyPhase"
-        raidStartRequested = false
-        ResetPlayersForRound()
-
-        -- Лобби: игроки готовятся в убежищах и запускают рейд кнопкой.
-        for _, p in Players:GetPlayers() do
-            if p.Character then p.Character:PivotTo(GetHideoutSpawn(p) * CFrame.new(math.random(-6, 6), 0, math.random(-6, 6))) end
-        end
-        stateChangedEvent:FireAllClients("LobbyPhase", 0)
-        while not raidStartRequested do
-            task.wait(0.2)
-        end
-
-        -- Фаза Сбора Лута
-        currentPhaseValue.Value = "LootPhase"
-        for _, p in Players:GetPlayers() do
-            if p.Character then p.Character:PivotTo(CFrame.new(Vector3.new(math.random(-15, 15), 3, -65))) end
-        end
-
-        lootContainer:ClearAllChildren()
-        weaponsContainer:ClearAllChildren()
-
-        local nightEvent = NightEvents.Pick(math.random())
-        for _, pos in activeLootPositions do
-            local baseItem = Config.LootTable[math.random(1, #Config.LootTable)]
-            local item = NightEvents.ScaleLootValue(baseItem, nightEvent.LootValueMultiplier)
-            SpawnLootItem(item, pos + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3)))
-        end
-
-        if nightEvent.JackpotLoot then
-            SpawnLootItem(nightEvent.JackpotLoot, Vector3.new(62, 1.5, -33))
-        end
-
-        SpawnGroundWeapon(Vector3.new(30, 13.5, -15))
-        SpawnGroundWeapon(Vector3.new(-20, 13.5, 30))
-
-        SpawnLasers()
-        CreateGuardNPC(Vector3.new(-15, 3, -15))
-        stateChangedEvent:FireAllClients("LootPhase", Config.LootDuration)
-        ApplyNightEvent(nightEvent)
-        task.wait(Config.LootDuration)
-
-        -- Фаза Эвакуации
-        currentPhaseValue.Value = "ExtractionPhase"
-        local zone = CreateExtractionZone()
-        stateChangedEvent:FireAllClients("ExtractionPhase", Config.ExtractionDuration)
-
-        local phaseEnd = os.clock() + Config.ExtractionDuration
-        while os.clock() < phaseEnd do
-            task.wait(0.2)
-
-            local overlap = OverlapParams.new()
-            overlap.FilterType = Enum.RaycastFilterType.Include
-            local chars = {}
-            for _, player in Players:GetPlayers() do
-                if player.Character then table.insert(chars, player.Character) end
-            end
-            overlap.FilterDescendantsInstances = chars
-
-            local touchingParts = workspace:GetPartsInPart(zone, overlap)
-            local inZone = {}
-            for _, part in touchingParts do
-                -- Resolve accessory parts as well as direct character body parts.
-                local character = part:FindFirstAncestorOfClass("Model")
-                local pl = character and Players:GetPlayerFromCharacter(character)
-                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-                if pl and character == pl.Character and humanoid and humanoid.Health > 0
-                    and not eliminatedPlayers[pl] then
-                    inZone[pl] = true
-                end
-            end
-
-            for player, _ in inZone do
-                local inv = playerInventories[player]
-                if inv and not inv.Escaped then
-                    if not extractingPlayers[player] then extractingPlayers[player] = os.clock() end
-                    local rem = math.max(0, 5 - (os.clock() - extractingPlayers[player]))
-                    extractionProgressEvent:FireClient(player, rem, false)
-
-                    if rem <= 0 then
-                        inv.Escaped = true
-                        extractingPlayers[player] = nil
-                        extractionProgressEvent:FireClient(player, 0, true)
-
-                        local leaderstats = player:FindFirstChild("leaderstats")
-                        local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-                        local raidsStat = leaderstats and leaderstats:FindFirstChild("Raids")
-                        local streakStat = leaderstats and leaderstats:FindFirstChild("Streak")
-                        local previousStreak = streakStat and streakStat.Value or 0
-                        local payout = LootLogic.ApplyStreakBonus(inv.TotalValue, previousStreak)
-                        if cash then cash.Value += payout end
-                        local updatedRaids, updatedStreak = RaidProgression.ApplyOutcome(
-                            raidsStat and raidsStat.Value or 0,
-                            previousStreak,
-                            true
-                        )
-                        if raidsStat then raidsStat.Value = updatedRaids end
-                        if streakStat then streakStat.Value = updatedStreak end
-                        SavePlayerData(player)
-
-                        local bonusPercent = LootLogic.GetStreakBonusPercent(previousStreak)
-                        if bonusPercent > 0 then
-                            inventoryUpdatedEvent:FireClient(player, inv, string.format(
-                                "Серия рейдов: %d. Бонус +%d%% к выручке!", previousStreak, bonusPercent
-                            ))
-                        end
-                        raidSummaryEvent:FireClient(player, true, payout, #inv.Items, (cash and cash.Value) or 0)
-                        if player.Character then player.Character:PivotTo(GetHideoutSpawn(player)) end
-                    end
-                end
-            end
-
-            for player, _ in extractingPlayers do
-                if not inZone[player] then
-                    extractingPlayers[player] = nil
-                    extractionProgressEvent:FireClient(player, -1, false)
-                end
-            end
-        end
-
-        for player, inv in playerInventories do
-            if not inv.Escaped then
-                local leaderstats = player:FindFirstChild("leaderstats")
-                local cash = leaderstats and leaderstats:FindFirstChild("Cash")
-                local streakStat = leaderstats and leaderstats:FindFirstChild("Streak")
-                if streakStat then
-                    local _, updatedStreak = RaidProgression.ApplyOutcome(
-                        leaderstats and leaderstats:FindFirstChild("Raids")
-                            and leaderstats.Raids.Value or 0,
-                        streakStat.Value,
-                        false
-                    )
-                    streakStat.Value = updatedStreak
-                    SavePlayerData(player)
-                end
-                raidSummaryEvent:FireClient(player, false, 0, 0, (cash and cash.Value) or 0)
-            end
-        end
-
-        if zone then zone:Destroy() end
-        ClearNightEvent()
-        local guard = workspace:FindFirstChild("GuardNPC")
-        if guard then guard:Destroy() end
-    end
-end)
-
--- Roblox may stop a server without every player leaving normally.
--- Save all loaded player data during shutdown and wait briefly for writes to finish.
+-- Корректное завершение работы сервера
 game:BindToClose(function()
     local playersToSave = Players:GetPlayers()
-    local pendingSaves = #playersToSave
-
-    if pendingSaves == 0 then
-        return
-    end
+    local pending = #playersToSave
+    if pending == 0 then return end
 
     for _, player in playersToSave do
         task.spawn(function()
-            SavePlayerData(player)
-            pendingSaves -= 1
+            DataService.SavePlayerData(player)
+            pending -= 1
         end)
     end
 
     local deadline = os.clock() + 25
-    while pendingSaves > 0 and os.clock() < deadline do
+    while pending > 0 and os.clock() < deadline do
         task.wait(0.1)
-    end
-
-    if pendingSaves > 0 then
-        warn(string.format(
-            "[DataStore] Завершение сервера: не дождались сохранения %d игроков.",
-            pendingSaves
-        ))
     end
 end)
 
-print("[СЕРВЕР]: Сервер готов. Network и цикл раундов функционируют.")
+-- Запуск игрового цикла
+RoundController.StartGameLoop()
+
+print("[СЕРВЕР]: Инициализация завершена. Модульная архитектура активна.")

@@ -1,0 +1,57 @@
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = {}
+
+local networkFolder = ReplicatedStorage:FindFirstChild("Network")
+if not networkFolder then
+    networkFolder = Instance.new("Folder")
+    networkFolder.Name = "Network"
+    networkFolder.Parent = ReplicatedStorage
+end
+
+local function getOrCreate(name: string, className: string): Instance
+    local existing = networkFolder:FindFirstChild(name)
+    if existing and existing:IsA(className) then
+        return existing
+    end
+    if existing then
+        existing:Destroy()
+    end
+    local instance = Instance.new(className)
+    instance.Name = name
+    instance.Parent = networkFolder
+    return instance
+end
+
+-- State & values
+Remotes.CurrentPhase = getOrCreate("CurrentPhase", "StringValue") :: StringValue
+Remotes.CurrentNightEvent = getOrCreate("CurrentNightEvent", "StringValue") :: StringValue
+
+-- Events
+Remotes.StateChanged = getOrCreate("StateChanged", "RemoteEvent") :: RemoteEvent
+Remotes.InventoryUpdated = getOrCreate("InventoryUpdated", "RemoteEvent") :: RemoteEvent
+Remotes.ExtractionProgress = getOrCreate("ExtractionProgress", "RemoteEvent") :: RemoteEvent
+Remotes.DropItem = getOrCreate("DropItem", "RemoteEvent") :: RemoteEvent
+Remotes.SelectLoadout = getOrCreate("SelectLoadout", "RemoteEvent") :: RemoteEvent
+Remotes.LoadoutApplied = getOrCreate("LoadoutApplied", "RemoteEvent") :: RemoteEvent
+Remotes.LoadoutsUpdated = getOrCreate("LoadoutsUpdated", "RemoteEvent") :: RemoteEvent
+Remotes.MakeNoise = getOrCreate("MakeNoise", "RemoteEvent") :: RemoteEvent
+Remotes.ShowRaidSummary = getOrCreate("ShowRaidSummary", "RemoteEvent") :: RemoteEvent
+Remotes.ThrowSmoke = getOrCreate("ThrowSmoke", "RemoteEvent") :: RemoteEvent
+Remotes.FireTaser = getOrCreate("FireTaser", "RemoteEvent") :: RemoteEvent
+Remotes.BuyUpgrade = getOrCreate("BuyUpgrade", "RemoteEvent") :: RemoteEvent
+Remotes.UpgradesUpdated = getOrCreate("UpgradesUpdated", "RemoteEvent") :: RemoteEvent
+Remotes.OpenHideoutStation = getOrCreate("OpenHideoutStation", "RemoteEvent") :: RemoteEvent
+Remotes.StartRaid = getOrCreate("StartRaid", "RemoteEvent") :: RemoteEvent
+Remotes.NightEvent = getOrCreate("NightEvent", "RemoteEvent") :: RemoteEvent
+Remotes.AlertLevelChanged = getOrCreate("AlertLevelChanged", "RemoteEvent") :: RemoteEvent
+Remotes.RevivePlayer = getOrCreate("RevivePlayer", "RemoteEvent") :: RemoteEvent
+Remotes.PlayerDownedState = getOrCreate("PlayerDownedState", "RemoteEvent") :: RemoteEvent
+
+-- Functions
+Remotes.GetOwnedLoadouts = getOrCreate("GetOwnedLoadouts", "RemoteFunction") :: RemoteFunction
+Remotes.GetRaidStatus = getOrCreate("GetRaidStatus", "RemoteFunction") :: RemoteFunction
+Remotes.GetRaidReplay = getOrCreate("GetRaidReplay", "RemoteFunction") :: RemoteFunction
+
+return Remotes

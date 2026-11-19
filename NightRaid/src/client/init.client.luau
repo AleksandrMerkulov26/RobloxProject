@@ -1,3 +1,4 @@
+--!strict
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -7,48 +8,52 @@ local TEST_MODE = RunService:IsStudio()
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
+local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
 
 local player = Players.LocalPlayer
 
 -- ==========================================
--- БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ К NETWORK (БЕЗ INFINITE YIELD)
+-- БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ К NETWORK
 -- ==========================================
 local networkFolder = ReplicatedStorage:WaitForChild("Network", 10)
 if not networkFolder then
-    warn("[КЛИЕНТ ОШИБКА]: Сетевая папка Network не найдена! Проверьте консоль сервера.")
+    warn("[Client Error]: Network folder not found!")
     return
 end
 
-local currentPhaseValue = networkFolder:WaitForChild("CurrentPhase")
-local stateChangedEvent = networkFolder:WaitForChild("StateChanged")
-local inventoryUpdatedEvent = networkFolder:WaitForChild("InventoryUpdated")
-local extractionProgressEvent = networkFolder:WaitForChild("ExtractionProgress")
-local dropItemEvent = networkFolder:WaitForChild("DropItem")
-local selectLoadoutEvent = networkFolder:WaitForChild("SelectLoadout")
-local loadoutsUpdatedEvent = networkFolder:WaitForChild("LoadoutsUpdated")
-local getOwnedLoadoutsFunction = networkFolder:WaitForChild("GetOwnedLoadouts")
-local loadoutAppliedEvent = networkFolder:WaitForChild("LoadoutApplied")
-local makeNoiseEvent = networkFolder:WaitForChild("MakeNoise")
-local raidSummaryEvent = networkFolder:WaitForChild("ShowRaidSummary")
-local throwSmokeEvent = networkFolder:WaitForChild("ThrowSmoke")
-local fireTaserEvent = networkFolder:WaitForChild("FireTaser")
-local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade")
-local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated")
-local openHideoutStationEvent = networkFolder:WaitForChild("OpenHideoutStation")
-local nightEventEvent = networkFolder:WaitForChild("NightEvent")
-local currentNightEventValue = networkFolder:WaitForChild("CurrentNightEvent")
-local getRaidStatusFunction = networkFolder:WaitForChild("GetRaidStatus")
-local startRaidEvent = networkFolder:WaitForChild("StartRaid")
+local currentPhaseValue = networkFolder:WaitForChild("CurrentPhase") :: StringValue
+local stateChangedEvent = networkFolder:WaitForChild("StateChanged") :: RemoteEvent
+local inventoryUpdatedEvent = networkFolder:WaitForChild("InventoryUpdated") :: RemoteEvent
+local extractionProgressEvent = networkFolder:WaitForChild("ExtractionProgress") :: RemoteEvent
+local dropItemEvent = networkFolder:WaitForChild("DropItem") :: RemoteEvent
+local selectLoadoutEvent = networkFolder:WaitForChild("SelectLoadout") :: RemoteEvent
+local loadoutsUpdatedEvent = networkFolder:WaitForChild("LoadoutsUpdated") :: RemoteEvent
+local getOwnedLoadoutsFunction = networkFolder:WaitForChild("GetOwnedLoadouts") :: RemoteFunction
+local loadoutAppliedEvent = networkFolder:WaitForChild("LoadoutApplied") :: RemoteEvent
+local makeNoiseEvent = networkFolder:WaitForChild("MakeNoise") :: RemoteEvent
+local raidSummaryEvent = networkFolder:WaitForChild("ShowRaidSummary") :: RemoteEvent
+local throwSmokeEvent = networkFolder:WaitForChild("ThrowSmoke") :: RemoteEvent
+local fireTaserEvent = networkFolder:WaitForChild("FireTaser") :: RemoteEvent
+local buyUpgradeEvent = networkFolder:WaitForChild("BuyUpgrade") :: RemoteEvent
+local upgradesUpdatedEvent = networkFolder:WaitForChild("UpgradesUpdated") :: RemoteEvent
+local openHideoutStationEvent = networkFolder:WaitForChild("OpenHideoutStation") :: RemoteEvent
+local nightEventEvent = networkFolder:WaitForChild("NightEvent") :: RemoteEvent
+local currentNightEventValue = networkFolder:WaitForChild("CurrentNightEvent") :: StringValue
+local getRaidStatusFunction = networkFolder:WaitForChild("GetRaidStatus") :: RemoteFunction
+local getRaidReplayFunction = networkFolder:WaitForChild("GetRaidReplay") :: RemoteFunction
+local startRaidEvent = networkFolder:WaitForChild("StartRaid") :: RemoteEvent
+local alertLevelChangedEvent = networkFolder:WaitForChild("AlertLevelChanged") :: RemoteEvent
+local playerDownedStateEvent = networkFolder:WaitForChild("PlayerDownedState") :: RemoteEvent
 
 local currentInventoryData = { TotalValue = 0, TotalWeight = 0, Items = {} }
 local currentLoadout = Config.Loadouts[1]
-local ownedLoadouts = { Default = true }
+local ownedLoadouts: { [string]: boolean } = { Default = true }
 local currentUpgrades = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
 
 -- ==========================================
 -- ЗВУКИ (SFX)
 -- ==========================================
-local function PlayLocalSFX(soundType)
+local function PlayLocalSFX(soundType: string)
     local sound = Instance.new("Sound")
     sound.Volume = 0.6
     sound.Parent = SoundService
@@ -103,7 +108,7 @@ task.spawn(CreateCrosshair)
 -- ==========================================
 local isFlashlightOn = false
 
-local lightAnchor = workspace:FindFirstChild("ClientFlashlightRig")
+local lightAnchor = workspace:FindFirstChild("ClientFlashlightRig") :: Part?
 if lightAnchor then lightAnchor:Destroy() end
 
 lightAnchor = Instance.new("Part")
@@ -138,10 +143,10 @@ fillPoint.Enabled = false
 fillPoint.Parent = lightAnchor
 
 RunService.RenderStepped:Connect(function()
-    if not isFlashlightOn then return end
+    if not isFlashlightOn or not lightAnchor then return end
 
     local char = player.Character
-    local head = char and char:FindFirstChild("Head")
+    local head = char and char:FindFirstChild("Head") :: BasePart?
     if head then
         local camCFrame = workspace.CurrentCamera.CFrame
         lightAnchor.CFrame = CFrame.lookAt(head.Position, head.Position + camCFrame.LookVector)
@@ -158,10 +163,10 @@ end
 -- КРЮК-КОШКА (КЛАВИША Q)
 -- ==========================================
 local isGrappling = false
-local alignPos = nil
-local activeBeam = nil
-local ropePart = nil
-local updateConn = nil
+local alignPos: AlignPosition? = nil
+local activeBeam: Beam? = nil
+local ropePart: Part? = nil
+local updateConn: RBXScriptConnection? = nil
 
 local function StopGrapple(boost: boolean)
     if not isGrappling then return end
@@ -173,7 +178,7 @@ local function StopGrapple(boost: boolean)
     end
 
     local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
     local hum = char and char:FindFirstChildOfClass("Humanoid")
 
     if hum then
@@ -199,7 +204,7 @@ end
 
 local function FireGrapple()
     local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum or hum.Health <= 0 or isGrappling then return end
 
@@ -219,39 +224,42 @@ local function FireGrapple()
     isGrappling = true
 
     PlayLocalSFX("Grapple")
-    makeNoiseEvent:FireServer(hrp.Position, 40)
+    makeNoiseEvent:FireServer()
 
-    ropePart = Instance.new("Part")
-    ropePart.Size = Vector3.new(0.5, 0.5, 0.5)
-    ropePart.Position = targetPos
-    ropePart.Anchored = true
-    ropePart.CanCollide = false
-    ropePart.Transparency = 1
-    ropePart.Parent = workspace
+    local newRope = Instance.new("Part")
+    newRope.Size = Vector3.new(0.5, 0.5, 0.5)
+    newRope.Position = targetPos
+    newRope.Anchored = true
+    newRope.CanCollide = false
+    newRope.Transparency = 1
+    newRope.Parent = workspace
+    ropePart = newRope
 
     local att0 = Instance.new("Attachment")
     att0.Parent = hrp
     local att1 = Instance.new("Attachment")
-    att1.Parent = ropePart
+    att1.Parent = newRope
 
-    activeBeam = Instance.new("Beam")
-    activeBeam.Attachment0 = att0
-    activeBeam.Attachment1 = att1
-    activeBeam.Width0 = 0.2
-    activeBeam.Width1 = 0.1
-    activeBeam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 180))
-    activeBeam.FaceCamera = true
-    activeBeam.LightEmission = 1
-    activeBeam.Parent = hrp
+    local newBeam = Instance.new("Beam")
+    newBeam.Attachment0 = att0
+    newBeam.Attachment1 = att1
+    newBeam.Width0 = 0.2
+    newBeam.Width1 = 0.1
+    newBeam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 180))
+    newBeam.FaceCamera = true
+    newBeam.LightEmission = 1
+    newBeam.Parent = hrp
+    activeBeam = newBeam
 
-    alignPos = Instance.new("AlignPosition")
-    alignPos.Mode = Enum.PositionAlignmentMode.TwoAttachment
-    alignPos.Attachment0 = att0
-    alignPos.Attachment1 = att1
-    alignPos.MaxForce = 1e6
-    alignPos.MaxVelocity = currentLoadout.GrappleSpeed or Config.GrapplePullSpeed
-    alignPos.Responsiveness = 45
-    alignPos.Parent = hrp
+    local newAlignPos = Instance.new("AlignPosition")
+    newAlignPos.Mode = Enum.PositionAlignmentMode.TwoAttachment
+    newAlignPos.Attachment0 = att0
+    newAlignPos.Attachment1 = att1
+    newAlignPos.MaxForce = 1e6
+    newAlignPos.MaxVelocity = currentLoadout.GrappleSpeed or Config.GrapplePullSpeed
+    newAlignPos.Responsiveness = 45
+    newAlignPos.Parent = hrp
+    alignPos = newAlignPos
 
     hum.AutoRotate = false
 
@@ -299,7 +307,7 @@ local function ThrowSmoke()
 end
 
 -- ==========================================
--- ОБРАБОТКА ВВОДА (E — ТОЛЬКО ВЗАИМОДЕЙСТВИЕ, Q — КРЮК)
+-- ОБРАБОТКА ВВОДА
 -- ==========================================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
@@ -334,17 +342,41 @@ local function CreateMainUI()
     -- Карточка статуса
     local card = Instance.new("Frame")
     card.Parent = hud
-    card.Size = UDim2.new(0, 250, 0, 155)
+    card.Size = UDim2.new(0, 250, 0, 175)
     card.Position = UDim2.new(1, -265, 0, 20)
     card.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     card.BackgroundTransparency = 0.2
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
+    local alertLabel = Instance.new("TextLabel")
+    alertLabel.Parent = card
+    alertLabel.Size = UDim2.new(1, -20, 0, 18)
+    alertLabel.Position = UDim2.new(0, 10, 0, 122)
+    alertLabel.Text = Locale.Format("AlertLevelText", 0)
+    alertLabel.TextColor3 = Color3.fromRGB(100, 255, 150)
+    alertLabel.TextSize = 11
+    alertLabel.Font = Enum.Font.GothamBold
+    alertLabel.TextXAlignment = Enum.TextXAlignment.Left
+    alertLabel.BackgroundTransparency = 1
+
+    alertLevelChangedEvent.OnClientEvent:Connect(function(level: number)
+        alertLabel.Text = Locale.Format("AlertLevelText", level)
+        if level >= 75 then
+            alertLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+        elseif level >= 40 then
+            alertLabel.TextColor3 = Color3.fromRGB(255, 170, 40)
+        elseif level > 0 then
+            alertLabel.TextColor3 = Color3.fromRGB(255, 230, 80)
+        else
+            alertLabel.TextColor3 = Color3.fromRGB(100, 255, 150)
+        end
+    end)
+
     local lootLabel = Instance.new("TextLabel")
     lootLabel.Parent = card
     lootLabel.Size = UDim2.new(1, -20, 0, 20)
     lootLabel.Position = UDim2.new(0, 10, 0, 6)
-    lootLabel.Text = "Добыча: $0"
+    lootLabel.Text = Locale.Format("LootLabel", 0)
     lootLabel.TextColor3 = Color3.fromRGB(0, 255, 180)
     lootLabel.TextSize = 17
     lootLabel.Font = Enum.Font.GothamBold
@@ -355,7 +387,7 @@ local function CreateMainUI()
     cashLabel.Parent = card
     cashLabel.Size = UDim2.new(1, -20, 0, 20)
     cashLabel.Position = UDim2.new(0, 10, 0, 30)
-    cashLabel.Text = "Баланс: $0"
+    cashLabel.Text = Locale.Format("BalanceLabel", 0)
     cashLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
     cashLabel.TextSize = 14
     cashLabel.Font = Enum.Font.GothamBold
@@ -363,21 +395,19 @@ local function CreateMainUI()
     cashLabel.BackgroundTransparency = 1
 
     local leaderstats = player:WaitForChild("leaderstats", 10)
-    local cashValue = leaderstats and leaderstats:WaitForChild("Cash", 5)
+    local cashValue = leaderstats and leaderstats:WaitForChild("Cash", 5) :: IntValue?
     if cashValue then
-        cashLabel.Text = string.format("Баланс: $%d", cashValue.Value)
+        cashLabel.Text = Locale.Format("BalanceLabel", cashValue.Value)
         cashValue:GetPropertyChangedSignal("Value"):Connect(function()
-            cashLabel.Text = string.format("Баланс: $%d", cashValue.Value)
+            cashLabel.Text = Locale.Format("BalanceLabel", cashValue.Value)
         end)
-    else
-        warn("[КЛИЕНТ]: Не удалось найти leaderstats.Cash для отображения баланса.")
     end
 
     local extractionLabel = Instance.new("TextLabel")
     extractionLabel.Parent = card
     extractionLabel.Size = UDim2.new(1, -20, 0, 20)
     extractionLabel.Position = UDim2.new(0, 10, 0, 78)
-    extractionLabel.Text = "Эвакуация: не активна"
+    extractionLabel.Text = Locale.Get("ExtractionInactive")
     extractionLabel.TextColor3 = Color3.fromRGB(160, 170, 185)
     extractionLabel.TextSize = 12
     extractionLabel.BackgroundTransparency = 1
@@ -417,9 +447,9 @@ local function CreateMainUI()
 
     local summaryClose = Instance.new("TextButton")
     summaryClose.Parent = summaryModal
-    summaryClose.Size = UDim2.new(1, -40, 0, 36)
-    summaryClose.Position = UDim2.new(0, 20, 1, -48)
-    summaryClose.Text = "Продолжить"
+    summaryClose.Size = UDim2.new(0.48, -10, 0, 36)
+    summaryClose.Position = UDim2.new(0, 15, 1, -48)
+    summaryClose.Text = Locale.Get("SummaryContinue")
     summaryClose.BackgroundColor3 = Color3.fromRGB(35, 115, 95)
     summaryClose.TextColor3 = Color3.fromRGB(255, 255, 255)
     summaryClose.Font = Enum.Font.GothamBold
@@ -429,12 +459,123 @@ local function CreateMainUI()
         summaryModal.Visible = false
     end)
 
+    local replayButton = Instance.new("TextButton")
+    replayButton.Parent = summaryModal
+    replayButton.Size = UDim2.new(0.48, -10, 0, 36)
+    replayButton.Position = UDim2.new(0.52, 5, 1, -48)
+    replayButton.Text = Locale.Get("ViewReplayButton")
+    replayButton.BackgroundColor3 = Color3.fromRGB(45, 95, 145)
+    replayButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    replayButton.Font = Enum.Font.GothamBold
+    replayButton.TextSize = 12
+    replayButton.ZIndex = 71
+    Instance.new("UICorner", replayButton).CornerRadius = UDim.new(0, 6)
+
+    -- Окно тактического реплея
+    local replayModal = Instance.new("Frame")
+    replayModal.Parent = hud
+    replayModal.Size = UDim2.new(0, 340, 0, 380)
+    replayModal.AnchorPoint = Vector2.new(0.5, 0.5)
+    replayModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    replayModal.BackgroundColor3 = Color3.fromRGB(15, 20, 26)
+    replayModal.Visible = false
+    replayModal.ZIndex = 80
+    Instance.new("UICorner", replayModal).CornerRadius = UDim.new(0, 12)
+
+    local repTitle = Instance.new("TextLabel")
+    repTitle.Parent = replayModal
+    repTitle.Size = UDim2.new(1, -50, 0, 36)
+    repTitle.Position = UDim2.new(0, 15, 0, 8)
+    repTitle.Text = Locale.Get("ReplayTitle")
+    repTitle.TextColor3 = Color3.fromRGB(0, 255, 180)
+    repTitle.Font = Enum.Font.GothamBold
+    repTitle.TextSize = 14
+    repTitle.TextXAlignment = Enum.TextXAlignment.Left
+    repTitle.BackgroundTransparency = 1
+    repTitle.ZIndex = 81
+
+    local repClose = Instance.new("TextButton")
+    repClose.Parent = replayModal
+    repClose.Size = UDim2.new(0, 30, 0, 30)
+    repClose.Position = UDim2.new(1, -38, 0, 10)
+    repClose.Text = "X"
+    repClose.TextColor3 = Color3.new(1, 1, 1)
+    repClose.BackgroundColor3 = Color3.fromRGB(130, 40, 40)
+    repClose.Font = Enum.Font.GothamBold
+    repClose.ZIndex = 82
+    Instance.new("UICorner", repClose).CornerRadius = UDim.new(0, 6)
+    repClose.MouseButton1Click:Connect(function() replayModal.Visible = false end)
+
+    local mapCanvas = Instance.new("Frame")
+    mapCanvas.Parent = replayModal
+    mapCanvas.Size = UDim2.new(0, 300, 0, 300)
+    mapCanvas.Position = UDim2.new(0.5, -150, 0, 48)
+    mapCanvas.BackgroundColor3 = Color3.fromRGB(24, 30, 38)
+    mapCanvas.ZIndex = 81
+    Instance.new("UICorner", mapCanvas).CornerRadius = UDim.new(0, 8)
+
+    local playerDot = Instance.new("Frame")
+    playerDot.Size = UDim2.new(0, 10, 0, 10)
+    playerDot.AnchorPoint = Vector2.new(0.5, 0.5)
+    playerDot.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
+    playerDot.ZIndex = 83
+    Instance.new("UICorner", playerDot).CornerRadius = UDim.new(1, 0)
+    playerDot.Parent = mapCanvas
+
+    local guardDot = Instance.new("Frame")
+    guardDot.Size = UDim2.new(0, 12, 0, 12)
+    guardDot.AnchorPoint = Vector2.new(0.5, 0.5)
+    guardDot.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    guardDot.ZIndex = 83
+    Instance.new("UICorner", guardDot).CornerRadius = UDim.new(1, 0)
+    guardDot.Parent = mapCanvas
+
+    local repLegend = Instance.new("TextLabel")
+    repLegend.Parent = replayModal
+    repLegend.Size = UDim2.new(1, -20, 0, 20)
+    repLegend.Position = UDim2.new(0, 10, 1, -24)
+    repLegend.Text = Locale.Get("ReplayLegend")
+    repLegend.TextColor3 = Color3.fromRGB(160, 175, 190)
+    repLegend.Font = Enum.Font.Gotham
+    repLegend.TextSize = 11
+    repLegend.BackgroundTransparency = 1
+    repLegend.ZIndex = 81
+
+    local isPlayingReplay = false
+
+    replayButton.MouseButton1Click:Connect(function()
+        local success, frames = pcall(function()
+            return getRaidReplayFunction:InvokeServer()
+        end)
+        if not success or type(frames) ~= "table" or #frames == 0 then return end
+
+        replayModal.Visible = true
+        isPlayingReplay = true
+
+        task.spawn(function()
+            for _, f in ipairs(frames) do
+                if not replayModal.Visible then break end
+                -- Преобразование мировых координат (-80..+80) в координаты канваса (0..300)
+                local px = math.clamp((f.PX + 80) / 160 * 300, 0, 300)
+                local pz = math.clamp((f.PZ + 80) / 160 * 300, 0, 300)
+                playerDot.Position = UDim2.new(0, px, 0, pz)
+                playerDot.BackgroundColor3 = f.Downed and Color3.fromRGB(255, 180, 50) or Color3.fromRGB(0, 255, 150)
+
+                local gx = math.clamp((f.GX + 80) / 160 * 300, 0, 300)
+                local gz = math.clamp((f.GZ + 80) / 160 * 300, 0, 300)
+                guardDot.Position = UDim2.new(0, gx, 0, gz)
+
+                task.wait(0.1)
+            end
+        end)
+    end)
+
     local weightLabel = Instance.new("TextLabel")
     weightLabel.Parent = card
     weightLabel.Size = UDim2.new(1, -20, 0, 20)
     weightLabel.Position = UDim2.new(0, 10, 0, 54)
     local effMaxW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
-    weightLabel.Text = string.format("Вес: 0.0 / %.1f кг [B]", effMaxW)
+    weightLabel.Text = Locale.Format("WeightLabel", 0.0, effMaxW)
     weightLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
     weightLabel.TextSize = 13
     weightLabel.Font = Enum.Font.GothamMedium
@@ -445,7 +586,7 @@ local function CreateMainUI()
     controlsHint.Parent = card
     controlsHint.Size = UDim2.new(1, -20, 0, 20)
     controlsHint.Position = UDim2.new(0, 10, 0, 100)
-    controlsHint.Text = "[E] Взять | [Q] Крюк | [F] Свет | [G] Дым"
+    controlsHint.Text = Locale.Get("ControlsHint")
     controlsHint.TextColor3 = Color3.fromRGB(150, 160, 180)
     controlsHint.TextSize = 11
     controlsHint.Font = Enum.Font.Gotham
@@ -466,7 +607,7 @@ local function CreateMainUI()
     title.Parent = invModal
     title.Size = UDim2.new(1, -20, 0, 40)
     title.Position = UDim2.new(0, 15, 0, 5)
-    title.Text = "РЮКЗАК НАЛЁТЧИКА [B чтобы закрыть]"
+    title.Text = Locale.Get("BackpackTitle")
     title.TextColor3 = Color3.fromRGB(0, 255, 180)
     title.TextSize = 16
     title.Font = Enum.Font.GothamBold
@@ -497,11 +638,14 @@ local function CreateMainUI()
             row.ZIndex = 17
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
+            local itemName = item.NameKey and Locale.Get(item.NameKey) or item.Name
+            local fragileTag = item.Fragile and (" " .. Locale.Get("FragileTag")) or ""
+
             local nameLabel = Instance.new("TextLabel")
             nameLabel.Parent = row
             nameLabel.Size = UDim2.new(0.65, 0, 1, 0)
             nameLabel.Position = UDim2.new(0, 10, 0, 0)
-            nameLabel.Text = string.format("%s ($%d, %.1f кг%s)", item.Name, item.Value, item.Weight, item.Fragile and " [ХРУПКОЕ]" or "")
+            nameLabel.Text = string.format("%s ($%d, %.1f kg%s)", itemName, item.Value, item.Weight, fragileTag)
             nameLabel.TextColor3 = item.Fragile and Color3.fromRGB(255, 140, 180) or Color3.fromRGB(255, 255, 255)
             nameLabel.TextSize = 12
             nameLabel.Font = Enum.Font.GothamMedium
@@ -513,7 +657,7 @@ local function CreateMainUI()
             dropBtn.Parent = row
             dropBtn.Size = UDim2.new(0, 85, 0, 28)
             dropBtn.Position = UDim2.new(1, -95, 0.5, -14)
-            dropBtn.Text = "Сбросить"
+            dropBtn.Text = Locale.Get("DropButton")
             dropBtn.BackgroundColor3 = Color3.fromRGB(160, 45, 45)
             dropBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             dropBtn.Font = Enum.Font.GothamBold
@@ -535,7 +679,7 @@ local function CreateMainUI()
         end
     end)
 
-    -- Комплекты: покупка навсегда, повторный выбор бесплатный.
+    -- Комплекты
     local loadoutModal = Instance.new("Frame")
     loadoutModal.Parent = hud
     loadoutModal.Name = "LoadoutModal"
@@ -552,7 +696,7 @@ local function CreateMainUI()
     loadoutTitle.Size = UDim2.new(1, -60, 0, 42)
     loadoutTitle.Position = UDim2.new(0, 18, 0, 8)
     loadoutTitle.BackgroundTransparency = 1
-    loadoutTitle.Text = "КОМПЛЕКТЫ"
+    loadoutTitle.Text = Locale.Get("LoadoutsTitle")
     loadoutTitle.TextColor3 = Color3.fromRGB(240, 180, 40)
     loadoutTitle.Font = Enum.Font.GothamBlack
     loadoutTitle.TextSize = 18
@@ -595,12 +739,15 @@ local function CreateMainUI()
             row.ZIndex = 57
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 7)
 
+            local lName = loadout.NameKey and Locale.Get(loadout.NameKey) or loadout.Name
+            local lDesc = loadout.DescKey and Locale.Get(loadout.DescKey) or loadout.Description
+
             local info = Instance.new("TextLabel")
             info.Parent = row
             info.Size = UDim2.new(1, -150, 1, -8)
             info.Position = UDim2.new(0, 12, 0, 4)
             info.BackgroundTransparency = 1
-            info.Text = string.format("%s\n%s", loadout.Name, loadout.Description)
+            info.Text = string.format("%s\n%s", lName, lDesc)
             info.TextColor3 = Color3.fromRGB(235, 240, 245)
             info.Font = Enum.Font.GothamMedium
             info.TextSize = 12
@@ -618,20 +765,20 @@ local function CreateMainUI()
             Instance.new("UICorner", action).CornerRadius = UDim.new(0, 6)
 
             if isEquipped then
-                action.Text = "ЭКИПИРОВАН"
+                action.Text = Locale.Get("Equipped")
                 action.BackgroundColor3 = Color3.fromRGB(45, 105, 85)
                 action.TextColor3 = Color3.fromRGB(255, 255, 255)
                 action.Active = false
                 action.AutoButtonColor = false
             elseif isOwned then
-                action.Text = "ВЫБРАТЬ"
+                action.Text = Locale.Get("Select")
                 action.BackgroundColor3 = Color3.fromRGB(45, 105, 155)
                 action.TextColor3 = Color3.fromRGB(255, 255, 255)
                 action.MouseButton1Click:Connect(function()
                     selectLoadoutEvent:FireServer(loadout.Id)
                 end)
             else
-                action.Text = TEST_MODE and "ПОЛУЧИТЬ БЕСПЛАТНО" or string.format("КУПИТЬ $%d", loadout.Cost)
+                action.Text = TEST_MODE and Locale.Get("GetFree") or Locale.Format("BuyCost", loadout.Cost)
                 action.BackgroundColor3 = Color3.fromRGB(190, 115, 30)
                 action.TextColor3 = Color3.fromRGB(255, 255, 255)
                 action.MouseButton1Click:Connect(function()
@@ -644,9 +791,9 @@ local function CreateMainUI()
 
     local loadoutsButton = Instance.new("TextButton")
     loadoutsButton.Parent = card
-    loadoutsButton.Size = UDim2.new(0, 108, 0, 25)
-    loadoutsButton.Position = UDim2.new(1, -118, 0, 122)
-    loadoutsButton.Text = "Комплекты [L]"
+    loadoutsButton.Size = UDim2.new(0, 108, 0, 24)
+    loadoutsButton.Position = UDim2.new(1, -118, 0, 144)
+    loadoutsButton.Text = Locale.Get("LoadoutsButton")
     loadoutsButton.TextSize = 11
     loadoutsButton.Font = Enum.Font.GothamBold
     loadoutsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -665,7 +812,6 @@ local function CreateMainUI()
         end
     end)
 
-    -- RemoteEvent может прийти до создания HUD, поэтому запрашиваем актуальное состояние.
     local ownershipSuccess, savedOwnedLoadouts = pcall(function()
         return getOwnedLoadoutsFunction:InvokeServer()
     end)
@@ -696,7 +842,7 @@ local function CreateMainUI()
     mTitle.Parent = marketModal
     mTitle.Size = UDim2.new(1, -40, 0, 45)
     mTitle.Position = UDim2.new(0, 20, 0, 8)
-    mTitle.Text = "ЧЁРНЫЙ РЫНОК: АПГРЕЙДЫ"
+    mTitle.Text = Locale.Get("MarketTitle")
     mTitle.TextColor3 = Color3.fromRGB(240, 180, 40)
     mTitle.Font = Enum.Font.GothamBlack
     mTitle.TextSize = 16
@@ -741,11 +887,13 @@ local function CreateMainUI()
             row.ZIndex = 52
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
+            local upgName = uData.NameKey and Locale.Get(uData.NameKey) or uData.Name
+
             local infoLabel = Instance.new("TextLabel")
             infoLabel.Parent = row
             infoLabel.Size = UDim2.new(0.65, 0, 1, 0)
             infoLabel.Position = UDim2.new(0, 12, 0, 0)
-            infoLabel.Text = string.format("%s (Ур. %d/%d)\nБонус: +%d за уровень", uData.Name, currentLvl, uData.MaxLevel, uData.BonusPerLevel)
+            infoLabel.Text = Locale.Format("UpgradeLevelInfo", upgName, currentLvl, uData.MaxLevel, uData.BonusPerLevel)
             infoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             infoLabel.Font = Enum.Font.GothamMedium
             infoLabel.TextSize = 12
@@ -761,14 +909,14 @@ local function CreateMainUI()
             Instance.new("UICorner", buyBtn).CornerRadius = UDim.new(0, 6)
 
             if nextCost then
-                buyBtn.Text = string.format("Купить ($%d)", nextCost)
+                buyBtn.Text = Locale.Format("BuyUpgradeCost", nextCost)
                 buyBtn.BackgroundColor3 = Color3.fromRGB(220, 140, 30)
                 buyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
                 buyBtn.MouseButton1Click:Connect(function()
                     buyUpgradeEvent:FireServer(uKey)
                 end)
             else
-                buyBtn.Text = "МАКС. УРОВЕНЬ"
+                buyBtn.Text = Locale.Get("MaxLevel")
                 buyBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 75)
                 buyBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
             end
@@ -779,20 +927,16 @@ local function CreateMainUI()
         currentUpgrades = newUpgrades
         spotBeam.Range = LootLogic.GetEffectiveFlashlightRange(75, currentUpgrades.Battery)
         local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
-        weightLabel.Text = string.format("Вес: %.1f / %.1f кг [B]", currentInventoryData.TotalWeight, effW)
+        weightLabel.Text = Locale.Format("WeightLabel", currentInventoryData.TotalWeight, effW)
 
         if openUI then marketModal.Visible = true end
         if marketModal.Visible then RefreshMarketUI() end
     end)
 
-    -- Forward declarations let the station callback access the command room UI below.
     local commandModal
     local RefreshCommandRoom
 
-    -- Station prompts open the existing interfaces instead of duplicating their logic.
     openHideoutStationEvent.OnClientEvent:Connect(function(stationName)
-        print("[HideoutStation][CLIENT] Received:", stationName, "Phase:", currentPhaseValue.Value)
-
         if stationName == "Armory" then
             marketModal.Visible = false
             loadoutModal.Visible = true
@@ -807,7 +951,7 @@ local function CreateMainUI()
         end
     end)
 
-    -- Command room: live raid roster and local spectator camera controls.
+    -- Command room
     commandModal = Instance.new("Frame")
     commandModal.Name = "CommandRoomModal"
     commandModal.Parent = hud
@@ -824,7 +968,7 @@ local function CreateMainUI()
     commandTitle.Size = UDim2.new(1, -110, 0, 42)
     commandTitle.Position = UDim2.new(0, 16, 0, 8)
     commandTitle.BackgroundTransparency = 1
-    commandTitle.Text = "ЦЕНТР УПРАВЛЕНИЯ РЕЙДОМ"
+    commandTitle.Text = Locale.Get("CommandTitle")
     commandTitle.TextColor3 = Color3.fromRGB(100, 220, 160)
     commandTitle.Font = Enum.Font.GothamBold
     commandTitle.TextSize = 16
@@ -854,7 +998,7 @@ local function CreateMainUI()
     commandRefresh.Parent = commandModal
     commandRefresh.Size = UDim2.new(0, 110, 0, 30)
     commandRefresh.Position = UDim2.new(1, -164, 0, 10)
-    commandRefresh.Text = "Обновить"
+    commandRefresh.Text = Locale.Get("CommandRefresh")
     commandRefresh.TextColor3 = Color3.new(1, 1, 1)
     commandRefresh.BackgroundColor3 = Color3.fromRGB(45, 90, 115)
     commandRefresh.Font = Enum.Font.GothamBold
@@ -865,7 +1009,7 @@ local function CreateMainUI()
     commandStatus.Size = UDim2.new(1, -32, 0, 24)
     commandStatus.Position = UDim2.new(0, 16, 0, 48)
     commandStatus.BackgroundTransparency = 1
-    commandStatus.Text = "Состояние игроков"
+    commandStatus.Text = Locale.Get("CommandStatusDefault")
     commandStatus.TextColor3 = Color3.fromRGB(180, 195, 205)
     commandStatus.Font = Enum.Font.Gotham
     commandStatus.TextSize = 12
@@ -893,7 +1037,7 @@ local function CreateMainUI()
             return getRaidStatusFunction:InvokeServer()
         end)
         if not success or type(roster) ~= "table" then
-            commandStatus.Text = "Не удалось получить состояние рейда"
+            commandStatus.Text = Locale.Get("CommandFailed")
             return
         end
 
@@ -925,7 +1069,7 @@ local function CreateMainUI()
                 watchButton.Parent = row
                 watchButton.Size = UDim2.new(0, 112, 0, 30)
                 watchButton.Position = UDim2.new(1, -122, 0.5, -15)
-                watchButton.Text = "НАБЛЮДАТЬ"
+                watchButton.Text = Locale.Get("CommandSpectate")
                 watchButton.TextColor3 = Color3.new(1, 1, 1)
                 watchButton.BackgroundColor3 = Color3.fromRGB(40, 115, 85)
                 watchButton.Font = Enum.Font.GothamBold
@@ -938,15 +1082,15 @@ local function CreateMainUI()
                     if targetHumanoid and targetHumanoid.Health > 0 then
                         local camera = workspace.CurrentCamera
                         camera.CameraSubject = targetHumanoid
-                        commandStatus.Text = "Наблюдение: " .. entry.DisplayName
+                        commandStatus.Text = Locale.Format("SpectatingTarget", entry.DisplayName)
                     else
-                        commandStatus.Text = "Игрок больше недоступен для наблюдения"
+                        commandStatus.Text = Locale.Get("SpectateUnavailable")
                     end
                 end)
             end
         end
 
-        commandStatus.Text = string.format("Игроков в рейде: %d · Обновляй список вручную", activeCount)
+        commandStatus.Text = Locale.Format("CommandActiveCount", activeCount)
         commandList.CanvasSize = UDim2.new(0, 0, 0, #roster * 54)
     end
 
@@ -957,36 +1101,39 @@ local function CreateMainUI()
         if appliedUpgrades then currentUpgrades = appliedUpgrades end
         spotBeam.Range = LootLogic.GetEffectiveFlashlightRange(75, currentUpgrades.Battery)
         local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
-        weightLabel.Text = string.format("Вес: %.1f / %.1f кг [B]", currentInventoryData.TotalWeight, effW)
+        weightLabel.Text = Locale.Format("WeightLabel", currentInventoryData.TotalWeight, effW)
         if loadoutModal.Visible then RefreshLoadoutsUI() end
     end)
 
     inventoryUpdatedEvent.OnClientEvent:Connect(function(invData, message)
-        currentInventoryData = invData
-        lootLabel.Text = string.format("Добыча: $%d", invData.TotalValue)
-        local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
-        weightLabel.Text = string.format("Вес: %.1f / %.1f кг [B]", invData.TotalWeight, effW)
-
-        if invModal.Visible then RefreshInventoryList() end
-        if message then PlayLocalSFX("Pickup") end
+        if invData and invData.TotalValue ~= nil then
+            currentInventoryData = invData
+            lootLabel.Text = Locale.Format("LootLabel", invData.TotalValue)
+            local effW = LootLogic.GetEffectiveMaxWeight(currentLoadout.MaxWeight, currentUpgrades.Pockets)
+            weightLabel.Text = Locale.Format("WeightLabel", invData.TotalWeight, effW)
+            if invModal.Visible then RefreshInventoryList() end
+        end
+        if message then
+            PlayLocalSFX("Pickup")
+        end
     end)
 
     extractionProgressEvent.OnClientEvent:Connect(function(remaining, completed)
         if completed then
-            extractionLabel.Text = "Эвакуация: успешно!"
+            extractionLabel.Text = Locale.Get("ExtractionSuccess")
         elseif remaining < 0 then
-            extractionLabel.Text = "Эвакуация: прервана"
+            extractionLabel.Text = Locale.Get("ExtractionAborted")
         else
-            extractionLabel.Text = string.format("Эвакуация: %.1f сек", remaining)
+            extractionLabel.Text = Locale.Format("ExtractionProgress", remaining)
         end
     end)
 
     raidSummaryEvent.OnClientEvent:Connect(function(escaped, lootValue, itemCount, totalCash)
-        summaryTitle.Text = escaped and "ЭВАКУАЦИЯ УСПЕШНА" or "РЕЙД НЕ ЗАВЕРШЁН"
+        summaryTitle.Text = escaped and Locale.Get("SummarySuccessTitle") or Locale.Get("SummaryFailedTitle")
         summaryTitle.TextColor3 = escaped and Color3.fromRGB(0, 255, 180) or Color3.fromRGB(255, 130, 100)
         summaryDetails.Text = escaped
-            and string.format("Вынесено предметов: %d\nСтоимость добычи: $%d\nПостоянный баланс: $%d", itemCount, lootValue, totalCash)
-            or string.format("Эвакуация не состоялась.\nДобыча потеряна.\nПостоянный баланс: $%d", totalCash)
+            and Locale.Format("SummarySuccessDetails", itemCount, lootValue, totalCash)
+            or Locale.Format("SummaryFailedDetails", totalCash)
         summaryModal.Visible = true
     end)
 end
@@ -1014,7 +1161,7 @@ local function CreateTimerUI()
     local phaseLabel = Instance.new("TextLabel")
     phaseLabel.Parent = topBar
     phaseLabel.Size = UDim2.new(1, 0, 1, 0)
-    phaseLabel.Text = "Загрузка..."
+    phaseLabel.Text = "..."
     phaseLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     phaseLabel.TextSize = 16
     phaseLabel.Font = Enum.Font.GothamBold
@@ -1026,7 +1173,7 @@ local function CreateTimerUI()
     startRaidButton.Position = UDim2.new(0.5, -110, 0, 68)
     startRaidButton.BackgroundColor3 = Color3.fromRGB(35, 135, 85)
     startRaidButton.TextColor3 = Color3.new(1, 1, 1)
-    startRaidButton.Text = "НАЧАТЬ РЕЙД"
+    startRaidButton.Text = Locale.Get("StartRaidButton")
     startRaidButton.Font = Enum.Font.GothamBold
     startRaidButton.TextSize = 15
     startRaidButton.Visible = currentPhaseValue.Value == "LobbyPhase"
@@ -1035,27 +1182,24 @@ local function CreateTimerUI()
     startRaidButton.MouseButton1Click:Connect(function()
         if currentPhaseValue.Value ~= "LobbyPhase" then return end
         startRaidButton.Active = false
-        startRaidButton.Text = "ЗАПРОС..."
+        startRaidButton.Text = Locale.Get("StartRaidRequest")
         startRaidEvent:FireServer()
-        -- If the server rejects the request (for example, outside the hideout),
-        -- allow the player to try again after moving to the correct location.
         task.delay(1.5, function()
             if currentPhaseValue.Value == "LobbyPhase" then
                 startRaidButton.Active = true
-                startRaidButton.Text = "НАЧАТЬ РЕЙД"
+                startRaidButton.Text = Locale.Get("StartRaidButton")
             end
         end)
     end)
 
-    -- A newer phase invalidates the timer task from the previous phase.
     local timerGeneration = 0
 
     stateChangedEvent.OnClientEvent:Connect(function(phase, dur)
         startRaidButton.Visible = phase == "LobbyPhase"
         startRaidButton.Active = phase == "LobbyPhase"
-        startRaidButton.Text = "НАЧАТЬ РЕЙД"
+        startRaidButton.Text = Locale.Get("StartRaidButton")
         if phase == "LobbyPhase" then
-            phaseLabel.Text = "Убежище — ожидание запуска"
+            phaseLabel.Text = Locale.Get("LobbyPhaseWaiting")
             phaseLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
         end
         timerGeneration += 1
@@ -1065,13 +1209,13 @@ local function CreateTimerUI()
             while currentGeneration == timerGeneration and os.clock() < finish do
                 local left = math.ceil(finish - os.clock())
                 if phase == "LobbyPhase" then
-                    phaseLabel.Text = string.format("Убежище: %d сек", left)
+                    phaseLabel.Text = Locale.Format("LobbyPhaseTimer", left)
                     phaseLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
                 elseif phase == "LootPhase" then
-                    phaseLabel.Text = string.format("Сбор лута: %d сек", left)
+                    phaseLabel.Text = Locale.Format("LootPhaseTimer", left)
                     phaseLabel.TextColor3 = Color3.fromRGB(0, 220, 255)
                 elseif phase == "ExtractionPhase" then
-                    phaseLabel.Text = string.format("ЭВАКУАЦИЯ: %d сек!", left)
+                    phaseLabel.Text = Locale.Format("ExtractionPhaseTimer", left)
                     phaseLabel.TextColor3 = Color3.fromRGB(0, 255, 140)
                 end
                 task.wait(1)
@@ -1081,7 +1225,6 @@ local function CreateTimerUI()
 end
 
 task.spawn(CreateTimerUI)
-
 
 -- ==========================================
 -- ИНДИКАТОР НОЧНОГО СОБЫТИЯ
@@ -1133,12 +1276,12 @@ local function CreateNightEventUI()
     local visiblePosition = UDim2.new(0.5, -195, 0, 20)
     local hiddenPosition = UDim2.new(0.5, -195, 0, -100)
 
-    local function showEvent(eventName, eventDescription)
+    local function showEvent(eventName: string, eventDesc: string)
         if type(eventName) ~= "string" or eventName == "" then return end
         generation += 1
         local currentGeneration = generation
         title.Text = eventName
-        description.Text = type(eventDescription) == "string" and eventDescription or ""
+        description.Text = type(eventDesc) == "string" and eventDesc or ""
         banner.Visible = true
         banner.Position = hiddenPosition
         banner.BackgroundTransparency = 0.08
@@ -1164,16 +1307,16 @@ local function CreateNightEventUI()
         end)
     end
 
-    nightEventEvent.OnClientEvent:Connect(function(_eventId, eventName, eventDescription)
-        showEvent(eventName, eventDescription)
+    nightEventEvent.OnClientEvent:Connect(function(eventId, eventName, eventDescription)
+        local translatedName = Locale.Get("Event_" .. tostring(eventId) .. "_Name")
+        local translatedDesc = Locale.Get("Event_" .. tostring(eventId) .. "_Desc")
+        showEvent(translatedName ~= ("Event_" .. tostring(eventId) .. "_Name") and translatedName or eventName,
+                  translatedDesc ~= ("Event_" .. tostring(eventId) .. "_Desc") and translatedDesc or eventDescription)
     end)
 
-    -- The value may already be replicated if the UI was created after the event.
     if currentNightEventValue.Value ~= "" then
         showEvent(currentNightEventValue.Value, "")
     end
 end
 
 task.spawn(CreateNightEventUI)
-
-print("[КЛИЕНТ]: Клиентский контроллер активен. Сбор [E], Крюк [Q], Фонарь [F], Дым [G].")

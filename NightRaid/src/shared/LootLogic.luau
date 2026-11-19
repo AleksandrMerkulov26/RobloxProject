@@ -1,3 +1,7 @@
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
+
 local LootLogic = {}
 
 -- ========================================================
@@ -21,7 +25,7 @@ function LootLogic.CanAffordLoadout(playerCash: number, loadoutCost: number): (b
     return false, playerCash
 end
 
-function LootLogic.ProcessFallDamage(itemsTable, fallDistance: number, breakThreshold: number)
+function LootLogic.ProcessFallDamage(itemsTable: { any }, fallDistance: number, breakThreshold: number)
     local remaining = {}
     local broken = {}
     local totalWeight = 0
@@ -62,7 +66,7 @@ function LootLogic.IsPlayerDetected(guardPos: Vector3, guardLookVector: Vector3,
     return dot >= fovDotThreshold
 end
 
-function LootLogic.GetDeathDropItems(items)
+function LootLogic.GetDeathDropItems(items: { any })
     local droppedItems = {}
     for _, item in ipairs(items) do
         table.insert(droppedItems, item)
@@ -74,7 +78,6 @@ function LootLogic.IsNoiseAudible(guardPos: Vector3, noisePos: Vector3, noiseRad
     return (guardPos - noisePos).Magnitude <= noiseRadius
 end
 
--- Alert mode improves awareness and movement for a short time after a sighting or loud noise.
 function LootLogic.GetGuardAwareness(isAlerted: boolean)
     if isAlerted then
         return {
@@ -95,7 +98,7 @@ function LootLogic.GetGuardAwareness(isAlerted: boolean)
     }
 end
 
-function LootLogic.IsVisionBlockedBySmoke(smokePositions, guardPos: Vector3, playerPos: Vector3, smokeRadius: number): boolean
+function LootLogic.IsVisionBlockedBySmoke(smokePositions: { Vector3 }, guardPos: Vector3, playerPos: Vector3, smokeRadius: number): boolean
     local rayDir = playerPos - guardPos
     local rayLen = rayDir.Magnitude
     if rayLen == 0 then return false end
@@ -128,21 +131,24 @@ end
 
 LootLogic.UpgradesConfig = {
     Pockets = {
-        Name = "Грузовые ремни",
+        NameKey = "Upgrade_Pockets_Name",
+        Name = Locale.Get("Upgrade_Pockets_Name"),
         BaseCost = 500,
         CostMultiplier = 1.8,
         MaxLevel = 3,
         BonusPerLevel = 5
     },
     SmokeStarter = {
-        Name = "Пояс под снаряжение",
+        NameKey = "Upgrade_SmokeStarter_Name",
+        Name = Locale.Get("Upgrade_SmokeStarter_Name"),
         BaseCost = 750,
         CostMultiplier = 2.0,
         MaxLevel = 2,
         BonusPerLevel = 1
     },
     Battery = {
-        Name = "LED-аккумулятор",
+        NameKey = "Upgrade_Battery_Name",
+        Name = Locale.Get("Upgrade_Battery_Name"),
         BaseCost = 300,
         CostMultiplier = 1.5,
         MaxLevel = 3,
@@ -175,7 +181,6 @@ function LootLogic.GetEffectiveFlashlightRange(baseRange: number, batteryLevel: 
     return baseRange + bonus
 end
 
--- Бонус за серию успешных эвакуаций: +10% за каждую, максимум +50%.
 LootLogic.StreakBonusPercentPerRaid = 10
 LootLogic.MaxStreakBonusPercent = 50
 

@@ -1,5 +1,8 @@
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
+
 -- Builds a personal underground hideout with readable lighting and detailed stations.
--- Persistent progression is stored separately in PlayerDataStore.
 local HideoutBuilder = {}
 
 local PLOT_SPACING = 100
@@ -16,7 +19,7 @@ local COLORS = {
     red = Color3.fromRGB(220, 90, 75),
 }
 
-local function createPart(parent, name, size, position, color, material, options)
+local function createPart(parent: Instance, name: string, size: Vector3, position: Vector3, color: Color3, material: Enum.Material?, options: { transparency: number?, canCollide: boolean? }?): Part
     local part = Instance.new("Part")
     part.Name = name
     part.Size = size
@@ -34,8 +37,8 @@ local function createPart(parent, name, size, position, color, material, options
     return part
 end
 
-local function addLight(parent, name, color, brightness, range, position)
-    local fixture = createPart(parent, name, Vector3.new(5, 0.25, 1), position, color, Enum.Material.Neon, {canCollide = false})
+local function addLight(parent: Instance, name: string, color: Color3, brightness: number, range: number, position: Vector3)
+    local fixture = createPart(parent, name, Vector3.new(5, 0.25, 1), position, color, Enum.Material.Neon, { canCollide = false })
     local light = Instance.new("PointLight")
     light.Name = "AreaLight"
     light.Color = color
@@ -46,7 +49,7 @@ local function addLight(parent, name, color, brightness, range, position)
     return fixture
 end
 
-local function addLabel(parent, title, accent, center)
+local function addLabel(parent: Instance, title: string, accent: Color3, center: Vector3)
     local board = createPart(parent, "StationSign", Vector3.new(10, 2.2, 0.35), center + Vector3.new(0, 5.2, -7), COLORS.dark, Enum.Material.Metal)
     local gui = Instance.new("SurfaceGui")
     gui.Face = Enum.NormalId.Front
@@ -63,7 +66,7 @@ local function addLabel(parent, title, accent, center)
     label.Parent = gui
 end
 
-local function addZone(parent, name, title, center, accent, stationType)
+local function addZone(parent: Instance, name: string, title: string, center: Vector3, accent: Color3, stationType: string)
     local zone = Instance.new("Model")
     zone.Name = name
     zone.Parent = parent
@@ -71,11 +74,10 @@ local function addZone(parent, name, title, center, accent, stationType)
     createPart(zone, "RaisedPlatform", Vector3.new(27, 0.35, 21), center + Vector3.new(0, 0.2, 0), COLORS.dark, Enum.Material.Metal)
     createPart(zone, "Floor", Vector3.new(26, 0.2, 20), center + Vector3.new(0, 0.45, 0), COLORS.floor, Enum.Material.Concrete)
 
-    -- Accent strips make each functional area easy to recognize.
-    createPart(zone, "AccentStrip", Vector3.new(22, 0.12, 0.35), center + Vector3.new(0, 0.62, 9.2), accent, Enum.Material.Neon, {canCollide = false})
+    createPart(zone, "AccentStrip", Vector3.new(22, 0.12, 0.35), center + Vector3.new(0, 0.62, 9.2), accent, Enum.Material.Neon, { canCollide = false })
 
     local console = createPart(zone, "MainStation", Vector3.new(8, 3.2, 2), center + Vector3.new(0, 2.25, -5), COLORS.metal, Enum.Material.Metal)
-    createPart(zone, "ConsoleScreen", Vector3.new(6.8, 1.8, 0.15), console.Position + Vector3.new(0, 0.45, -1.08), accent, Enum.Material.Neon, {canCollide = false})
+    createPart(zone, "ConsoleScreen", Vector3.new(6.8, 1.8, 0.15), console.Position + Vector3.new(0, 0.45, -1.08), accent, Enum.Material.Neon, { canCollide = false })
     addLabel(zone, title, accent, center)
 
     if stationType == "Armory" then
@@ -83,7 +85,7 @@ local function addZone(parent, name, title, center, accent, stationType)
             local rack = createPart(zone, "WeaponRack", Vector3.new(1, 5, 7), center + Vector3.new(i * 8, 3, 4), COLORS.metal, Enum.Material.DiamondPlate)
             createPart(zone, "RackShelf", Vector3.new(1.4, 0.25, 7.5), rack.Position + Vector3.new(0, -1, 0), COLORS.warm, Enum.Material.Metal)
             for j = -1, 1 do
-                createPart(zone, "DisplayWeapon", Vector3.new(0.25, 0.35, 4), rack.Position + Vector3.new(0.7, j * 1.25, 0), COLORS.dark, Enum.Material.Metal, {canCollide = false})
+                createPart(zone, "DisplayWeapon", Vector3.new(0.25, 0.35, 4), rack.Position + Vector3.new(0.7, j * 1.25, 0), COLORS.dark, Enum.Material.Metal, { canCollide = false })
             end
         end
     elseif stationType == "Workshop" then
@@ -95,7 +97,7 @@ local function addZone(parent, name, title, center, accent, stationType)
     elseif stationType == "Command" then
         for i = -1, 1 do
             local screen = createPart(zone, "Monitor", Vector3.new(5, 3, 0.3), center + Vector3.new(i * 6, 4, 2), COLORS.dark, Enum.Material.Metal)
-            createPart(zone, "MonitorDisplay", Vector3.new(4.5, 2.5, 0.12), screen.Position + Vector3.new(0, 0, -0.22), COLORS.blue, Enum.Material.Neon, {canCollide = false})
+            createPart(zone, "MonitorDisplay", Vector3.new(4.5, 2.5, 0.12), screen.Position + Vector3.new(0, 0, -0.22), COLORS.blue, Enum.Material.Neon, { canCollide = false })
         end
         createPart(zone, "OperatorDesk", Vector3.new(18, 1, 3), center + Vector3.new(0, 2, 6), COLORS.metal, Enum.Material.Metal)
     elseif stationType == "Living" then
@@ -107,10 +109,9 @@ local function addZone(parent, name, title, center, accent, stationType)
 
     addLight(zone, "StationLight", accent, 2.2, 24, center + Vector3.new(0, 9, 0))
 
-    -- Functional station prompt; server validates that only the owner can use it.
     local stationPrompt = Instance.new("ProximityPrompt")
     stationPrompt.Name = "StationPrompt"
-    stationPrompt.ActionText = "Открыть"
+    stationPrompt.ActionText = Locale.Get("Select")
     stationPrompt.ObjectText = title
     stationPrompt.KeyboardKeyCode = Enum.KeyCode.E
     stationPrompt.HoldDuration = 0
@@ -121,7 +122,7 @@ local function addZone(parent, name, title, center, accent, stationType)
     return zone, stationPrompt
 end
 
-function HideoutBuilder.Build(userId, slot, savedData)
+function HideoutBuilder.Build(userId: number, slot: number, savedData: any): (Model, CFrame, ProximityPrompt, { [string]: ProximityPrompt })
     local plotPosition = PLOT_ORIGIN + Vector3.new(((slot - 1) % 4) * PLOT_SPACING, 0, math.floor((slot - 1) / 4) * PLOT_SPACING)
     local model = Instance.new("Model")
     model.Name = "Hideout_" .. tostring(userId)
@@ -143,26 +144,25 @@ function HideoutBuilder.Build(userId, slot, savedData)
     createPart(model, "RightWall", Vector3.new(2, 18, 54), Vector3.new(x + 31, y + 11, z), COLORS.wall, Enum.Material.Concrete)
     createPart(model, "Roof", Vector3.new(64, 2, 54), Vector3.new(x, y + 21, z), COLORS.dark, Enum.Material.Metal)
 
-    -- Main ceiling lights ensure the hideout is usable without a flashlight,
-    -- even though the raid map keeps its night-time lighting.
     addLight(model, "CeilingLight_A", COLORS.warm, 3.5, 38, Vector3.new(x - 16, y + 19, z - 12))
     addLight(model, "CeilingLight_B", COLORS.warm, 3.5, 38, Vector3.new(x + 16, y + 19, z - 12))
     addLight(model, "CeilingLight_C", COLORS.warm, 3.5, 38, Vector3.new(x - 16, y + 19, z + 13))
     addLight(model, "CeilingLight_D", COLORS.warm, 3.5, 38, Vector3.new(x + 16, y + 19, z + 13))
 
     local stationPrompts = {}
-    local _, armoryPrompt = addZone(model, "Armory", "АРСЕНАЛ", Vector3.new(x - 17, y + 2.2, z - 10), COLORS.warm, "Armory")
-    local _, workshopPrompt = addZone(model, "Workshop", "МАСТЕРСКАЯ", Vector3.new(x + 17, y + 2.2, z - 10), COLORS.blue, "Workshop")
-    local _, commandPrompt = addZone(model, "Command", "УПРАВЛЕНИЕ", Vector3.new(x - 17, y + 2.2, z + 13), COLORS.green, "Command")
-    addZone(model, "Living", "ЖИЛОЙ СЕКТОР", Vector3.new(x + 17, y + 2.2, z + 13), Color3.fromRGB(185, 140, 220), "Living")
+    local _, armoryPrompt = addZone(model, "Armory", Locale.Get("StationArmory"), Vector3.new(x - 17, y + 2.2, z - 10), COLORS.warm, "Armory")
+    local _, workshopPrompt = addZone(model, "Workshop", Locale.Get("StationWorkshop"), Vector3.new(x + 17, y + 2.2, z - 10), COLORS.blue, "Workshop")
+    local _, commandPrompt = addZone(model, "Command", Locale.Get("StationCommand"), Vector3.new(x - 17, y + 2.2, z + 13), COLORS.green, "Command")
+    addZone(model, "Living", Locale.Get("StationLiving"), Vector3.new(x + 17, y + 2.2, z + 13), Color3.fromRGB(185, 140, 220), "Living")
+
     stationPrompts.Armory = armoryPrompt
     stationPrompts.Workshop = workshopPrompt
     stationPrompts.Command = commandPrompt
 
     local counter = createPart(model, "DealerCounter", Vector3.new(8, 3, 2), Vector3.new(x, y + 3.5, z - 23), Color3.fromRGB(75, 49, 31), Enum.Material.Wood)
     local prompt = Instance.new("ProximityPrompt")
-    prompt.ActionText = "Открыть рынок"
-    prompt.ObjectText = "Скупщик"
+    prompt.ActionText = Locale.Get("OpenMarketPrompt")
+    prompt.ObjectText = Locale.Get("StationDealer")
     prompt.KeyboardKeyCode = Enum.KeyCode.E
     prompt.HoldDuration = 0
     prompt.MaxActivationDistance = 9
