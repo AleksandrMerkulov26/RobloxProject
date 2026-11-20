@@ -202,7 +202,10 @@ CoopService.SetDependencies({
 })
 
 local function InitPlayer(player: Player)
-    DataService.LoadPlayerData(player)
+    if not DataService.LoadPlayerData(player) then
+        player:Kick("Your data could not be loaded safely. Please rejoin in a moment.")
+        return
+    end
 
     local slot = AllocateHideoutSlot(player)
     local hideoutData = DataService.GetHideoutData(player)
