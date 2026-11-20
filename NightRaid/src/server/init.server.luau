@@ -283,6 +283,25 @@ local function InitPlayer(player: Player)
             local inv = LootService.GetInventory(player)
             local isEscaped = inv and inv.Escaped
 
+            -- A lethal hit can reach Died before the HealthChanged handler has
+            -- completed the downed transition. Give the downed flow one chance
+            -- to restore the character to 1 HP and create the revive prompt.
+            if raidIsActive and not isEscaped and not eliminatedPlayers[player]
+                and not CoopService.IsDowned(player) then
+                hum.Health = 1
+                CoopService.DownPlayer(player)
+            end
+
+            -- A downed player must stay in the raid for the bleedout window.
+            -- Do not run the normal respawn/elimination path while awaiting revive.
+            if CoopService.IsDowned(player) then
+                if hum.Health <= 0 then
+                    hum.Health = 1
+                end
+                hum:ChangeState(Enum.HumanoidStateType.Physics)
+                return
+            end
+
             -- Если смерть произошла вне рейда (в лобби, после побега или при повторном падении на базе)
             if not raidIsActive or isEscaped or eliminatedPlayers[player] then
                 task.delay(2, function()
@@ -293,7 +312,7 @@ local function InitPlayer(player: Player)
                 return
             end
 
-            -- Смерть в рейде (сброс персонажа через меню или падение в бездну)
+            -- Смерть в рейде, которую не удалось перевести в состояние Downed.
             handlePlayerElimination(player, hrp.Position)
         end)
 
