@@ -219,7 +219,9 @@ end
 Remotes.DropItem.OnServerEvent:Connect(function(player: Player, itemIndex: any)
     local inv = playerInventories[player]
     if not inv or inv.Escaped then return end
+    if player.Parent ~= _Players then return end
     if isPlayerEliminatedFn and isPlayerEliminatedFn(player) then return end
+    if isPlayerDownedFn and isPlayerDownedFn(player) then return end
 
     if typeof(itemIndex) ~= "number"
         or itemIndex ~= itemIndex
