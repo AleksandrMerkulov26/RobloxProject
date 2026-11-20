@@ -184,17 +184,17 @@ expect("payout rounds down", LootLogic.ApplyStreakBonus(155, 1), 170)
 -- Weighted night-event selection and event modifiers.
 expect("edge roll 0.0 picks first event (Blackout)", NightEvents.Pick(0.0).Id, "Blackout")
 expect("Blackout is selected at low roll", NightEvents.Pick(0.1).Id, "Blackout")
-expect("Red Alert is selected at middle roll", NightEvents.Pick(0.4).Id, "RedAlert")
-expect("Jackpot is selected at jackpot roll", NightEvents.Pick(0.6).Id, "Jackpot")
-expect("Calm is selected at high roll", NightEvents.Pick(0.9).Id, "Calm")
-expect("edge roll 0.999999 picks last event (Calm)", NightEvents.Pick(0.999999).Id, "Calm")
+expect("Red Alert is selected at middle roll", NightEvents.Pick(0.3).Id, "RedAlert")
+expect("Jackpot is selected at jackpot roll", NightEvents.Pick(0.4).Id, "Jackpot")
+expect("Calm is selected at high roll", NightEvents.Pick(0.6).Id, "Calm")
+expect("edge roll 0.999999 picks last event (ThickFog)", NightEvents.Pick(0.999999).Id, "ThickFog")
 expect("negative roll is clamped to Blackout", NightEvents.Pick(-1.0).Id, "Blackout")
-expect("roll exceeding 1.0 is clamped to Calm", NightEvents.Pick(2.5).Id, "Calm")
-local jackpotEvent = NightEvents.Pick(0.6)
+expect("roll exceeding 1.0 is clamped to ThickFog", NightEvents.Pick(2.5).Id, "ThickFog")
+local jackpotEvent = NightEvents.Pick(0.4)
 local jackpotItem = jackpotEvent.JackpotLoot
 expect("Jackpot contains golden crown id", jackpotItem and jackpotItem.Id, "Crown")
 expect("Blackout enables darkness", NightEvents.Pick(0.1).Darkness, true)
-expect("Calm does not enable darkness", NightEvents.Pick(0.9).Darkness, false)
+expect("Calm does not enable darkness", NightEvents.Pick(0.6).Darkness, false)
 
 local awareness = {
     ViewDistance = 55,
@@ -205,7 +205,7 @@ local awareness = {
 }
 local blackout = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.1))
 expect("Blackout reduces guard view distance", blackout.ViewDistance, 38.5)
-local redAlert = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.4))
+local redAlert = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.3))
 expect("Red Alert increases guard view distance", redAlert.ViewDistance, 66)
 expectNear("Red Alert increases patrol speed", redAlert.PatrolSpeed, 14.85, 0.000001)
 
