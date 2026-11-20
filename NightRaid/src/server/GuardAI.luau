@@ -37,13 +37,16 @@ local activeGuardModel: Model? = nil
 
 local isPlayerEliminatedFn: ((player: Player) -> boolean)?
 local getActiveNightEventFn: (() -> any)?
+local applyPlayerDamageFn: ((humanoid: Humanoid, damage: number) -> ())?
 
 function GuardAI.SetDependencies(deps: {
     IsPlayerEliminated: (player: Player) -> boolean,
     GetActiveNightEvent: () -> any,
+    ApplyPlayerDamage: (humanoid: Humanoid, damage: number) -> (),
 })
     isPlayerEliminatedFn = deps.IsPlayerEliminated
     getActiveNightEventFn = deps.GetActiveNightEvent
+    applyPlayerDamageFn = deps.ApplyPlayerDamage
 end
 
 function GuardAI.RegisterNoise(position: Vector3, radius: number)
@@ -298,7 +301,11 @@ function GuardAI.SpawnPatrolDog(spawnPos: Vector3): Model
                 if (targetPlayerRoot.Position - root.Position).Magnitude <= 5 then
                     local targetHum = targetPlayerRoot.Parent and targetPlayerRoot.Parent:FindFirstChildOfClass("Humanoid")
                     if targetHum then
-                        targetHum:TakeDamage(15)
+                        if applyPlayerDamageFn then
+                            applyPlayerDamageFn(targetHum, 15)
+                        else
+                            targetHum:TakeDamage(15)
+                        end
                         GuardAI.RegisterNoise(root.Position, 70)
                         task.wait(0.6)
                     end
@@ -551,7 +558,11 @@ function GuardAI.SpawnGuard(spawnPos: Vector3, customWaypoints: { Vector3 }?): M
                     if (targetRoot.Position - root.Position).Magnitude <= 5 then
                         local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
                         if targetHumanoid then
-                            targetHumanoid:TakeDamage(25)
+                            if applyPlayerDamageFn then
+                                applyPlayerDamageFn(targetHumanoid, 25)
+                            else
+                                targetHumanoid:TakeDamage(25)
+                            end
                             task.wait(0.5)
                         end
                     end
