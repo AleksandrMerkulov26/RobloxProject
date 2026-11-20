@@ -49,6 +49,14 @@ end
 
 local function loadCharacterForPlayer(player: Player)
     if player.Parent == Players then
+        warn(string.format(
+            "[DeathDebug] LoadCharacterForPlayer player=%s phase=%s eliminated=%s downed=%s\\n%s",
+            player.Name,
+            Remotes.CurrentPhase.Value,
+            tostring(eliminatedPlayers[player] == true),
+            tostring(player:GetAttribute("IsDowned") == true),
+            debug.traceback("LoadCharacterForPlayer call stack", 2)
+        ))
         local success, err = pcall(function()
             player:LoadCharacterAsync()
         end)
@@ -153,6 +161,14 @@ end
 
 local function handlePlayerElimination(player: Player, hrpPosition: Vector3)
     local phase = Remotes.CurrentPhase.Value
+    warn(string.format(
+        "[DeathDebug] handlePlayerElimination player=%s phase=%s health=%s downed=%s eliminatedBefore=%s",
+        player.Name,
+        phase,
+        tostring(player.Character and player.Character:FindFirstChildOfClass("Humanoid") and player.Character:FindFirstChildOfClass("Humanoid").Health),
+        tostring(CoopService.IsDowned(player)),
+        tostring(isPlayerEliminated(player))
+    ))
     local raidIsActive = RaidProgression.ShouldEliminate(phase)
     if raidIsActive then
         eliminatedPlayers[player] = true
@@ -242,6 +258,7 @@ local function InitPlayer(player: Player)
     Remotes.HideoutDecoUpdated:FireClient(player, DataService.GetHideoutDecos(player))
 
     player.CharacterAdded:Connect(function(char: Model)
+        warn(string.format("[DeathDebug] CharacterAdded player=%s character=%s phase=%s", player.Name, char:GetFullName(), Remotes.CurrentPhase.Value))
         task.wait(0.2)
         CosmeticsService.ApplyCosmetics(player)
         if Remotes.CurrentPhase.Value == "LobbyPhase" or eliminatedPlayers[player] then
@@ -263,6 +280,16 @@ local function InitPlayer(player: Player)
         local deathHandled = false
 
         hum.HealthChanged:Connect(function(health)
+            warn(string.format(
+                "[DeathDebug] HealthChanged player=%s health=%.2f state=%s downed=%s eliminated=%s handled=%s phase=%s",
+                player.Name,
+                health,
+                hum:GetState().Name,
+                tostring(CoopService.IsDowned(player)),
+                tostring(isPlayerEliminated(player)),
+                tostring(deathHandled),
+                Remotes.CurrentPhase.Value
+            ))
             if health > 0 or deathHandled then
                 return
             end
@@ -305,6 +332,15 @@ local function InitPlayer(player: Player)
 
         -- Defensive fallback. Normally unreachable because the Dead state is disabled.
         hum.Died:Connect(function()
+            warn(string.format(
+                "[DeathDebug] Humanoid.Died player=%s health=%.2f state=%s downed=%s eliminated=%s phase=%s",
+                player.Name,
+                hum.Health,
+                hum:GetState().Name,
+                tostring(CoopService.IsDowned(player)),
+                tostring(isPlayerEliminated(player)),
+                Remotes.CurrentPhase.Value
+            ))
             if deathHandled then return end
             deathHandled = true
 
