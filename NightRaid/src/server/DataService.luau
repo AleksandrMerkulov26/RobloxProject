@@ -47,9 +47,9 @@ local function acquireSessionLock(player: Player, key: string): boolean
     if not dataStoreAvailable or not PlayerDataStore then return false end
 
     local token = HttpService:GenerateGUID(false)
-    local now = os.time()
     local success, updatedRecord = pcall(function()
         return PlayerDataStore:UpdateAsync(key, function(oldValue)
+            local now = os.time()
             local record
             if type(oldValue) == "table" then
                 record = oldValue
@@ -96,9 +96,9 @@ end
 
 local function renewSessionLock(player: Player, token: string)
     local key = "Player_" .. player.UserId
-    local now = os.time()
     local success, updatedRecord = pcall(function()
         return PlayerDataStore:UpdateAsync(key, function(oldValue)
+            local now = os.time()
             if type(oldValue) ~= "table" then return nil end
             local lock = oldValue._SessionLock
             if type(lock) ~= "table" or lock.Token ~= token then return nil end
@@ -541,8 +541,15 @@ function DataService.SavePlayerData(player: Player): boolean
 end
 
 function DataService.RemovePlayer(player: Player)
-    DataService.SavePlayerData(player)
-    releaseSessionLock(player)
+    local saved = DataService.SavePlayerData(player)
+    if saved then
+        releaseSessionLock(player)
+    else
+        -- Do not release a profile after a failed save. Let the lease expire so a
+        -- reconnect cannot load stale data immediately after a transient failure.
+        sessionTokens[player] = nil
+        warn(string.format("[DataService] Keeping the session lease for %s until expiry because the final save failed.", player.Name))
+    end
     playerDataLoaded[player] = nil
     playerOwnedLoadouts[player] = nil
     playerUpgrades[player] = nil
