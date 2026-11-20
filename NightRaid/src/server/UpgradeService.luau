@@ -23,11 +23,27 @@ function UpgradeService.Init()
 
         local canBuy, newCash, newLvl = LootLogic.CanPurchaseUpgrade(cash.Value, upgradeKey, currentLvl)
         if canBuy then
+            local previousCash = cash.Value
+            local previousLevel = currentLvl
+
             cash.Value = newCash
             local upgDict: { [string]: any } = upg
             upgDict[upgradeKey] = newLvl
             DataService.SetUpgrades(player, upg)
-            DataService.SavePlayerData(player)
+
+            -- Treat the purchase as a transaction: don't report success or
+            -- apply the upgrade until the updated profile has been saved.
+            if not DataService.SavePlayerData(player) then
+                cash.Value = previousCash
+                upgDict[upgradeKey] = previousLevel
+                DataService.SetUpgrades(player, upg)
+                Remotes.InventoryUpdated:FireClient(
+                    player,
+                    {},
+                    "Не удалось сохранить покупку. Средства возвращены."
+                )
+                return
+            end
 
             local curLoadout = LoadoutService.GetActiveLoadout(player)
             LoadoutService.ApplyLoadout(player, curLoadout)
