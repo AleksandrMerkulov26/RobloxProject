@@ -33,6 +33,7 @@ local playerHideouts: { [Player]: { Model: Model, SpawnCFrame: CFrame, Data: any
 local playerHideoutSlots: { [Player]: number } = {}
 local hideoutSlotOwners: { [number]: Player? } = {}
 local eliminatedPlayers: { [Player]: boolean } = {}
+local handledDeathCharacters: { [Model]: boolean } = {}
 local remoteActionTimes: { [Player]: { [string]: number } } = {}
 local playerSmokeCharges: { [Player]: number } = {}
 
@@ -161,6 +162,12 @@ local function AllocateHideoutSlot(player: Player): number
 end
 
 local function handlePlayerElimination(player: Player, hrpPosition: Vector3)
+    local character = player.Character
+    if character and handledDeathCharacters[character] then return end
+    if character then
+        handledDeathCharacters[character] = true
+    end
+
     local phase = Remotes.CurrentPhase.Value
     local raidIsActive = RaidProgression.ShouldEliminate(phase)
     if raidIsActive then
@@ -233,8 +240,11 @@ applyPlayerDamageFn = function(humanoid: Humanoid, damage: number)
     end
 
     if inRaid and humanoid.Health - damage <= 0 then
-        humanoid.Health = math.max(1, humanoid.Health)
         CoopService.DownPlayer(player)
+        if not CoopService.IsDowned(player) then
+            -- Fail safely if the character cannot enter the downed state.
+            humanoid:TakeDamage(damage)
+        end
         return
     end
 
@@ -297,6 +307,10 @@ local function InitPlayer(player: Player)
         hum.WalkSpeed = activeLoadout.WalkSpeed
 
         hum.Died:Connect(function()
+            if CoopService.IsDowned(player) then
+                CoopService.ClearDowned(player)
+            end
+
             local phase = Remotes.CurrentPhase.Value
             local raidIsActive = RaidProgression.ShouldEliminate(phase)
             local inv = LootService.GetInventory(player)
