@@ -469,29 +469,39 @@ end)
 
 Remotes.ToggleCrouch.OnServerEvent:Connect(function(player: Player, isCrouched: any)
     if typeof(isCrouched) ~= "boolean" then return end
-    player:SetAttribute("IsCrouched", isCrouched)
+    local phase = Remotes.CurrentPhase.Value
+    if phase ~= "LootPhase" and phase ~= "ExtractionPhase" then return end
+    if player.Parent ~= Players or eliminatedPlayers[player] or CoopService.IsDowned(player) then return end
 
     local char = player.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum and not CoopService.IsDowned(player) then
-        local inv = LootService.GetInventory(player)
-        local curLoadout = LoadoutService.GetActiveLoadout(player)
-        local effMaxWeight = getEffectiveMaxWeight(player)
-        local baseSpeed = LootLogic.CalculateWalkSpeed(
-            inv and inv.TotalWeight or 0,
-            effMaxWeight,
-            curLoadout.WalkSpeed,
-            8
-        )
-        hum.WalkSpeed = if isCrouched then math.max(6, math.floor(baseSpeed * 0.55)) else baseSpeed
-    end
+    if not hum or hum.Health <= 0 then return end
+    if not canPerformAction(player, "ToggleCrouch", 0.15) then return end
+
+    player:SetAttribute("IsCrouched", isCrouched)
+    local inv = LootService.GetInventory(player)
+    local curLoadout = LoadoutService.GetActiveLoadout(player)
+    local effMaxWeight = getEffectiveMaxWeight(player)
+    local baseSpeed = LootLogic.CalculateWalkSpeed(
+        inv and inv.TotalWeight or 0,
+        effMaxWeight,
+        curLoadout.WalkSpeed,
+        8
+    )
+    hum.WalkSpeed = if isCrouched then math.max(6, math.floor(baseSpeed * 0.55)) else baseSpeed
 end)
 
 Remotes.RadioPing.OnServerEvent:Connect(function(player: Player, pingPos: any, pingType: any)
     local phase = Remotes.CurrentPhase.Value
     if phase ~= "LootPhase" and phase ~= "ExtractionPhase" then return end
-    if not isFiniteVector3(pingPos) then return end
-    if typeof(pingType) ~= "string" then pingType = "Danger" end
+    if player.Parent ~= Players or eliminatedPlayers[player] or CoopService.IsDowned(player) then return end
+    if not isFiniteVector3(pingPos) or pingType ~= "Danger" then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid or humanoid.Health <= 0 then return end
+    if (hrp.Position - pingPos).Magnitude > 250 then return end
     if not canPerformAction(player, "RadioPing", 1.5) then return end
 
     Remotes.RadioPing:FireAllClients(player, pingPos, pingType)
@@ -519,20 +529,23 @@ end)
 
 Remotes.RevivePlayer.OnServerEvent:Connect(function(player: Player, targetPlayer: any)
     if typeof(targetPlayer) ~= "Instance" or not targetPlayer:IsA("Player") then return end
-    if targetPlayer == player then return end
-    if CoopService.IsDowned(targetPlayer) and not CoopService.IsDowned(player) then
-        local char = player.Character
-        local targetChar = targetPlayer.Character
-        if char and targetChar and char.PrimaryPart and targetChar.PrimaryPart then
-            if (char.PrimaryPart.Position - targetChar.PrimaryPart.Position).Magnitude <= 15 then
-                CoopService.RevivePlayer(targetPlayer, player)
-            end
-        end
-    end
+    CoopService.RevivePlayer(targetPlayer, player)
 end)
 
 Remotes.BuyHideoutDeco.OnServerEvent:Connect(function(player: Player, decoId: any)
-    if typeof(decoId) ~= "string" then return end
+    if typeof(decoId) ~= "string" or #decoId > 32 then return end
+    if player.Parent ~= Players or Remotes.CurrentPhase.Value ~= "LobbyPhase" then return end
+    if eliminatedPlayers[player] or CoopService.IsDowned(player) then return end
+    if not canPerformAction(player, "BuyHideoutDeco", 0.5) then return end
+
+    local hideout = playerHideouts[player]
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    local counter = hideout and hideout.Model:FindFirstChild("DealerCounter", true)
+    if not hrp or not humanoid or humanoid.Health <= 0 or not counter or not counter:IsA("BasePart") then return end
+    if (hrp.Position - counter.Position).Magnitude > 15 then return end
+
     local DECO_PRICES: { [string]: number } = {
         NeonSign = 1000,
         ArmoredDoor = 2500,
