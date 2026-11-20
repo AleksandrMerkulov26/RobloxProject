@@ -40,6 +40,21 @@ if not game then
     }
 end
 
+-- Roblox accepts ModuleScript instances in require(), while Lune's require()
+-- accepts module paths. Translate the mocked Locale ModuleScript to a tiny
+-- deterministic implementation and delegate all string paths to native require.
+local nativeRequire = require
+require = function(module)
+    if type(module) == "table" then
+        return {
+            Get = function(key) return key end,
+            Format = function(key, ...) return key end,
+        }
+    end
+
+    return nativeRequire(module)
+end
+
 local RaidProgression = require("../src/shared/RaidProgression")
 local LootLogic = require("../src/shared/LootLogic")
 local NightEvents = require("../src/shared/NightEvents")
