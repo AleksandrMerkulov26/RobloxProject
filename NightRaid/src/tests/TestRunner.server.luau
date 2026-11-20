@@ -1,6 +1,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
 local NightEvents = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NightEvents"))
+local MapConfigs = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MapConfigs"))
+local CosmeticsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("CosmeticsConfig"))
+local ContractService = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ContractService"))
 
 local totalCount = 0
 local passCount = 0
@@ -235,7 +238,42 @@ local function RunSuite()
     AssertTest("Чёрная ночь уменьшает обзор охранника", blackoutAwareness.ViewDistance, 38.5)
     local alertAwareness = NightEvents.ApplyToAwareness(awareness, NightEvents.Pick(0.4))
     AssertTest("Красная тревога увеличивает обзор охранника", alertAwareness.ViewDistance, 66)
-    AssertTest("Джекпот содержит корону (проверка по Id)", NightEvents.Pick(0.6).JackpotLoot.Id, "Crown")
+    local jackpotEvent = NightEvents.Pick(0.6)
+    local jackpotLoot = jackpotEvent.JackpotLoot
+    AssertTest("Джекпот содержит корону (проверка по Id)", jackpotLoot and jackpotLoot.Id, "Crown")
+
+    -- ----------------------------------------------------
+    -- БЛОК 12: ДАННЫЕ И РАЗНООБРАЗИЕ КАРТ
+    -- ----------------------------------------------------
+    print("\n-- [12. Дата-дривен карты и пропсы] --")
+    local mapList = MapConfigs.GetMapList()
+    AssertTest("Все 3 карты зарегистрированы", #mapList, 3)
+    AssertTest("Склад Apex содержит стеллажи", #MapConfigs.Get("Warehouse").Shelves > 0, true)
+    AssertTest("Депозитарий Centurion содержит серверные шкафы", #MapConfigs.Get("Archive").Props > 0, true)
+    AssertTest("Морской терминал содержит контейнеры", #MapConfigs.Get("Docks").Containers > 0, true)
+    AssertTest("У каждой карты настроены камеры наблюдения", #MapConfigs.Get("Warehouse").Cameras > 0 and #MapConfigs.Get("Archive").Cameras > 0, true)
+    AssertTest("У каждой карты настроены уникальные маршруты патруля", #MapConfigs.Get("Warehouse").GuardWaypoints > 0 and #MapConfigs.Get("Archive").GuardWaypoints > 0, true)
+
+    -- ----------------------------------------------------
+    -- БЛОК 13: КОСМЕТИКА И МАСКИ
+    -- ----------------------------------------------------
+    print("\n-- [13. Косметика, Маски и Скины] --")
+    AssertTest("Каталог косметики содержит предметы", #CosmeticsConfig.Items > 0, true)
+    AssertTest("Маска Балаклава существует", CosmeticsConfig.GetItem("Balaclava") ~= nil, true)
+    AssertTest("Кибер-маска Они существует", CosmeticsConfig.GetItem("OniCyber") ~= nil, true)
+    AssertTest("Скин крюка NeonGrapple существует", CosmeticsConfig.GetItem("NeonGrapple") ~= nil, true)
+
+    -- ----------------------------------------------------
+    -- БЛОК 14: ЕЖЕДНЕВНЫЕ КОНТРАКТЫ
+    -- ----------------------------------------------------
+    print("\n-- [14. Ежедневные контракты] --")
+    local dayNum = ContractService.GetDayNumber()
+    AssertTest("Номер текущего дня больше нуля", dayNum > 0, true)
+    local dailyContracts = ContractService.GetDailyContracts()
+    AssertTest("Пул контрактов дня выдаёт ровно 3 задания", #dailyContracts, 3)
+    AssertTest("Первый контракт имеет корректный Id", type(dailyContracts[1].Id) == "string", true)
+    AssertTest("Награда за контракт положительна", dailyContracts[1].RewardCash > 0, true)
+    AssertTest("Целевое значение контракта положительно", dailyContracts[1].TargetAmount > 0, true)
 
     print("\n--------------------------------------------------------")
     if failCount == 0 then

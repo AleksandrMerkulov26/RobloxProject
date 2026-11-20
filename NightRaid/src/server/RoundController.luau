@@ -20,11 +20,14 @@ local AnalyticsService = require(script.Parent:WaitForChild("AnalyticsService"))
 local CoopService = require(script.Parent:WaitForChild("CoopService"))
 local ReplayService = require(script.Parent:WaitForChild("ReplayService"))
 local LearningGuardService = require(script.Parent:WaitForChild("LearningGuardService"))
+local ContractService = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ContractService"))
+local LeaderboardService = require(script.Parent:WaitForChild("LeaderboardService"))
 
 local RoundController = {}
 type MapConfig = MapConfigs.MapConfig
 
 local currentMapConfig: MapConfig = MapConfigs.Get("Warehouse")
+local roundVaultUnlocked: boolean = false
 
 -- Lighting defaults
 local BASE_AMBIENT = Color3.fromRGB(30, 32, 38)
@@ -68,25 +71,15 @@ function RoundController.InitFacility()
     -- Initial setup, map will be dynamically built per raid
 end
 
-local function BuildRaidMap(mapConfig: MapConfig)
-    currentMapConfig = mapConfig
-    activeLootPositions = MapBuilder.BuildMap(mapConfig, function(doorPosition: Vector3, player: Player, withKeycard: boolean)
-        if withKeycard then
-            GuardAI.RegisterNoise(doorPosition, 30)
-            CoopService.AddAlert(10)
-            local inv = LootService.GetInventory(player)
-            if inv then
-                Remotes.InventoryUpdated:FireClient(player, inv, Locale.Get("VaultUnlockedWithKeycard"))
-            end
-        else
-            GuardAI.RegisterNoise(doorPosition, 120)
-            CoopService.AddAlert(40)
-            local inv = LootService.GetInventory(player)
-            if inv then
-                Remotes.InventoryUpdated:FireClient(player, inv, Locale.Get("AlarmSafe"))
-            end
+local function SetFacilityLampsEmergency()
+    local facility = workspace:FindFirstChild("HeistFacility")
+    if not facility then return end
+    for _, descendant in facility:GetDescendants() do
+        if descendant:IsA("PointLight") then
+            descendant.Color = Color3.fromRGB(255, 30, 30)
+            descendant.Brightness = 2.5
         end
-    end)
+    end
 end
 
 local function SetFacilityLampsEnabled(enabled: boolean)
@@ -97,6 +90,42 @@ local function SetFacilityLampsEnabled(enabled: boolean)
             descendant.Enabled = enabled
         end
     end
+end
+
+local function BuildRaidMap(mapConfig: MapConfig)
+    currentMapConfig = mapConfig
+    roundVaultUnlocked = false
+    activeLootPositions = MapBuilder.BuildMap(mapConfig, function(doorPosition: Vector3, player: Player, withKeycard: boolean)
+        roundVaultUnlocked = true
+        if withKeycard then
+            GuardAI.RegisterNoise(doorPosition, 30)
+            CoopService.AddAlert(10)
+            local inv = LootService.GetInventory(player)
+            if inv then
+                Remotes.InventoryUpdated:FireClient(player, inv, Locale.Get("VaultUnlockedWithKeycard"))
+            end
+        else
+            GuardAI.RegisterNoise(doorPosition, 120)
+            CoopService.AddAlert(50)
+            SetFacilityLampsEmergency()
+            local inv = LootService.GetInventory(player)
+            if inv then
+                Remotes.InventoryUpdated:FireClient(player, inv, Locale.Get("AlarmSafe"))
+            end
+            task.delay(30, function()
+                local curPhase = Remotes.CurrentPhase.Value
+                if curPhase == "LootPhase" or curPhase == "ExtractionPhase" then
+                    GuardAI.SpawnPatrolDog(doorPosition + Vector3.new(0, 0, 20))
+                    for _, p in Players:GetPlayers() do
+                        local pInv = LootService.GetInventory(p)
+                        if pInv then
+                            Remotes.InventoryUpdated:FireClient(p, pInv, "🚨 ТРЕВОГА ХРАНИЛИЩА: ВЫЗВАНА ГРУППА ПЕРЕХВАТА!")
+                        end
+                    end
+                end
+            end)
+        end
+    end)
 end
 
 local function ApplyNightEvent(event: any)
@@ -227,7 +256,7 @@ function RoundController.StartGameLoop()
 
             if nightEvent.JackpotLoot then
                 local vaultLootPos = selectedMap.Vault.LootPositions[1] or Vector3.new(0, 1.5, 0)
-                LootService.SpawnLootItem(nightEvent.JackpotLoot, vaultLootPos)
+                LootService.SpawnLootItem(nightEvent.JackpotLoot :: any, vaultLootPos)
             end
 
             MapBuilder.SpawnKeycard(selectedMap.KeycardSpawns)
@@ -247,10 +276,19 @@ function RoundController.StartGameLoop()
             GuardAI.ClearAllEntities()
             ReplayService.StartRecording()
 
+            LearningGuardService.SetMapFloorSize(selectedMap.FloorSize)
             local guardSpawn = selectedMap.GuardSpawns[1] or Vector3.new(-15, 3, -15)
-            local guardModel = GuardAI.SpawnGuard(guardSpawn)
+            local adaptedWaypoints = LearningGuardService.GetAdaptiveWaypoints(selectedMap.GuardWaypoints or {})
+            local guardModel = GuardAI.SpawnGuard(guardSpawn, adaptedWaypoints)
             GuardAI.SpawnPatrolDog(guardSpawn + Vector3.new(10, 0, 10))
-            GuardAI.SpawnCamera(Vector3.new(0, 20, 0), Vector3.new(0, -0.3, 1))
+
+            if selectedMap.Cameras then
+                for _, cam in ipairs(selectedMap.Cameras) do
+                    GuardAI.SpawnCamera(cam.Pos, cam.Dir)
+                end
+            else
+                GuardAI.SpawnCamera(Vector3.new(0, 20, 0), Vector3.new(0, -0.3, 1))
+            end
 
             Remotes.StateChanged:FireAllClients("LootPhase", Config.LootDuration)
             ApplyNightEvent(nightEvent)
@@ -266,105 +304,195 @@ function RoundController.StartGameLoop()
                     lastHeatTrack = os.clock()
                     LearningGuardService.TrackPlayerPositions()
                 end
+
+                -- Досрочное завершение рейда, если все игроки элиминированы
+                local anyActiveInRaid = false
+                for _, player in Players:GetPlayers() do
+                    local isElim = isPlayerEliminatedFn and isPlayerEliminatedFn(player)
+                    local inv = LootService.GetInventory(player)
+                    local isEscaped = inv and inv.Escaped
+                    if not isElim and not isEscaped then
+                        anyActiveInRaid = true
+                        break
+                    end
+                end
+                if not anyActiveInRaid and #Players:GetPlayers() > 0 then
+                    break
+                end
             end
 
-            -- 3. ФАЗА ЭВАКУАЦИИ
-            Remotes.CurrentPhase.Value = "ExtractionPhase"
-            local zone = CreateExtractionZone()
-            Remotes.StateChanged:FireAllClients("ExtractionPhase", Config.ExtractionDuration)
-
-            local phaseEnd = os.clock() + Config.ExtractionDuration
-            while os.clock() < phaseEnd do
-                task.wait(0.25)
-                ReplayService.RecordSnapshot(guardModel)
-
-                local overlap = OverlapParams.new()
-                overlap.FilterType = Enum.RaycastFilterType.Include
-                local chars = {}
-                for _, player in Players:GetPlayers() do
-                    if player.Character then table.insert(chars, player.Character) end
+            -- 3. ФАЗА ЭВАКУАЦИИ (запускается только если есть активные игроки на карте)
+            local hasActivePlayersForExtraction = false
+            for _, player in Players:GetPlayers() do
+                local isElim = isPlayerEliminatedFn and isPlayerEliminatedFn(player)
+                local inv = LootService.GetInventory(player)
+                local isEscaped = inv and inv.Escaped
+                if not isElim and not isEscaped then
+                    hasActivePlayersForExtraction = true
+                    break
                 end
-                overlap.FilterDescendantsInstances = chars
+            end
 
-                local touchingParts = workspace:GetPartsInPart(zone, overlap)
-                local inZone: { [Player]: boolean } = {}
-                for _, part in touchingParts do
-                    local character = part:FindFirstAncestorOfClass("Model")
-                    local pl = character and Players:GetPlayerFromCharacter(character)
-                    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-                    if pl and character == pl.Character and humanoid and humanoid.Health > 0
-                        and not (isPlayerEliminatedFn and isPlayerEliminatedFn(pl)) then
-                        inZone[pl] = true
+            local zone: Part? = nil
+            if hasActivePlayersForExtraction then
+                Remotes.CurrentPhase.Value = "ExtractionPhase"
+                zone = CreateExtractionZone()
+                Remotes.StateChanged:FireAllClients("ExtractionPhase", Config.ExtractionDuration)
+
+                local phaseEnd = os.clock() + Config.ExtractionDuration
+                while os.clock() < phaseEnd do
+                    task.wait(0.25)
+                    ReplayService.RecordSnapshot(guardModel)
+
+                    local overlap = OverlapParams.new()
+                    overlap.FilterType = Enum.RaycastFilterType.Include
+                    local chars = {}
+                    for _, player in Players:GetPlayers() do
+                        if player.Character then table.insert(chars, player.Character) end
                     end
-                end
+                    overlap.FilterDescendantsInstances = chars
 
-                for player, _ in inZone do
-                    local inv = LootService.GetInventory(player)
-                    if inv and not inv.Escaped then
-                        if not extractingPlayers[player] then
-                            extractingPlayers[player] = os.clock()
+                    local touchingParts = workspace:GetPartsInPart(zone, overlap)
+                    local inZone: { [Player]: boolean } = {}
+                    for _, part in touchingParts do
+                        local character = part:FindFirstAncestorOfClass("Model")
+                        local pl = character and Players:GetPlayerFromCharacter(character)
+                        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                        if pl and character == pl.Character and humanoid and humanoid.Health > 0
+                            and not (isPlayerEliminatedFn and isPlayerEliminatedFn(pl))
+                            and not CoopService.IsDowned(pl) then
+                            inZone[pl] = true
                         end
-                        local rem = math.max(0, 5 - (os.clock() - extractingPlayers[player]))
-                        Remotes.ExtractionProgress:FireClient(player, rem, false)
+                    end
 
-                        if rem <= 0 then
-                            inv.Escaped = true
-                            extractingPlayers[player] = nil
-                            Remotes.ExtractionProgress:FireClient(player, 0, true)
+                    for player, _ in inZone do
+                        local inv = LootService.GetInventory(player)
+                        if inv and not inv.Escaped then
+                            if not extractingPlayers[player] then
+                                extractingPlayers[player] = os.clock()
+                            end
+                            local rem = math.max(0, 5 - (os.clock() - extractingPlayers[player]))
+                            Remotes.ExtractionProgress:FireClient(player, rem, false)
 
-                            local leaderstats = player:FindFirstChild("leaderstats")
-                            local cash = leaderstats and leaderstats:FindFirstChild("Cash") :: IntValue?
-                            local raidsStat = leaderstats and leaderstats:FindFirstChild("Raids") :: IntValue?
-                            local streakStat = leaderstats and leaderstats:FindFirstChild("Streak") :: IntValue?
-                            local prevStreak = streakStat and streakStat.Value or 0
+                            if rem <= 0 then
+                                inv.Escaped = true
+                                extractingPlayers[player] = nil
+                                Remotes.ExtractionProgress:FireClient(player, 0, true)
 
-                            local alivePlayersCount = 0
-                            for _, p in Players:GetPlayers() do
-                                if not (isPlayerEliminatedFn and isPlayerEliminatedFn(p)) then
-                                    alivePlayersCount += 1
+                                local leaderstats = player:FindFirstChild("leaderstats")
+                                local cash = leaderstats and leaderstats:FindFirstChild("Cash") :: IntValue?
+                                local raidsStat = leaderstats and leaderstats:FindFirstChild("Raids") :: IntValue?
+                                local streakStat = leaderstats and leaderstats:FindFirstChild("Streak") :: IntValue?
+                                local prevStreak = streakStat and streakStat.Value or 0
+
+                                local alivePlayersCount = 0
+                                for _, p in Players:GetPlayers() do
+                                    if not (isPlayerEliminatedFn and isPlayerEliminatedFn(p)) then
+                                        alivePlayersCount += 1
+                                    end
+                                end
+                                local coopBonusPercent = CoopService.CalculateCoopBonusPercent(alivePlayersCount)
+
+                                local streakPayout = LootLogic.ApplyStreakBonus(inv.TotalValue, prevStreak)
+                                local payout = math.floor(streakPayout * (100 + coopBonusPercent) / 100)
+                                if cash then cash.Value += payout end
+
+                                local updatedRaids, updatedStreak = RaidProgression.ApplyOutcome(
+                                    raidsStat and raidsStat.Value or 0,
+                                    prevStreak,
+                                    true
+                                )
+                                if raidsStat then raidsStat.Value = updatedRaids end
+                                if streakStat then streakStat.Value = updatedStreak end
+
+                                for _, itm in ipairs(inv.Items) do
+                                    if itm.Id and (itm.Id == "Crown" or itm.Id == "GoldBar" or itm.Id == "DiamondNecklace" or itm.Id == "PrototypeLaser") then
+                                        local unlockedNew = DataService.UnlockTrophy(player, itm.Id)
+                                        if unlockedNew then
+                                            Remotes.TrophiesUpdated:FireClient(player, DataService.GetTrophies(player))
+                                            Remotes.InventoryUpdated:FireClient(player, inv, string.format("★ НОВЫЙ ТРОФЕЙ В УБЕЖИЩЕ: %s!", itm.Name))
+                                        end
+                                    end
+                                end
+
+                                -- Проверка и выполнение ежедневных контрактов
+                                local contractsData = DataService.GetContracts(player)
+                                for _, contract in ipairs(ContractService.GetDailyContracts()) do
+                                    if not contractsData.Completed[contract.Id] then
+                                        local conditionMet = false
+                                        if contract.Id == "LootValue1500" then
+                                            conditionMet = inv.TotalValue >= contract.TargetAmount
+                                        elseif contract.Id == "UnlockVault" then
+                                            conditionMet = roundVaultUnlocked
+                                        elseif contract.Id == "EscapeStreak2" then
+                                            conditionMet = updatedStreak >= contract.TargetAmount
+                                        elseif contract.Id == "ExtractFragile" then
+                                            for _, item in ipairs(inv.Items) do
+                                                if item.Fragile == true then
+                                                    conditionMet = true
+                                                    break
+                                                end
+                                            end
+                                        end
+
+                                        if conditionMet then
+                                            local completed, reward = DataService.CheckAndCompleteContract(player, contract.Id, contract.TargetAmount)
+                                            if completed then
+                                                Remotes.ContractsUpdated:FireClient(player, DataService.GetContracts(player))
+                                                Remotes.InventoryUpdated:FireClient(player, inv, Locale.Format("ContractCompletedNotice", contract.Title, reward))
+                                            end
+                                        end
+                                    end
+                                end
+
+                                -- Запись в еженедельный лидерборд
+                                LeaderboardService.RecordPlayerCash(player.UserId, cash and cash.Value or 0)
+
+                                task.spawn(function()
+                                    DataService.SavePlayerData(player)
+                                end)
+
+                                local bonusPercent = LootLogic.GetStreakBonusPercent(prevStreak)
+                                if bonusPercent > 0 then
+                                    Remotes.InventoryUpdated:FireClient(player, inv, Locale.Format(
+                                        "StreakBonusNotification", prevStreak, bonusPercent
+                                    ))
+                                end
+                                if coopBonusPercent > 0 then
+                                    Remotes.InventoryUpdated:FireClient(player, inv, Locale.Format(
+                                        "TeamBonusNotice", coopBonusPercent
+                                    ))
+                                end
+
+                                Remotes.ShowRaidSummary:FireClient(player, true, payout, #inv.Items, (cash and cash.Value) or 0)
+                                local currentLoadout = LoadoutService.GetActiveLoadout(player)
+                                AnalyticsService.OnPlayerEscaped(player, payout, #inv.Items, currentLoadout.Id)
+                                if player.Character and getHideoutSpawnFn then
+                                    player.Character:PivotTo(getHideoutSpawnFn(player))
                                 end
                             end
-                            local coopBonusPercent = CoopService.CalculateCoopBonusPercent(alivePlayersCount)
-
-                            local streakPayout = LootLogic.ApplyStreakBonus(inv.TotalValue, prevStreak)
-                            local payout = math.floor(streakPayout * (100 + coopBonusPercent) / 100)
-                            if cash then cash.Value += payout end
-
-                            local updatedRaids, updatedStreak = RaidProgression.ApplyOutcome(
-                                raidsStat and raidsStat.Value or 0,
-                                prevStreak,
-                                true
-                            )
-                            if raidsStat then raidsStat.Value = updatedRaids end
-                            if streakStat then streakStat.Value = updatedStreak end
-                            DataService.SavePlayerData(player)
-
-                            local bonusPercent = LootLogic.GetStreakBonusPercent(prevStreak)
-                            if bonusPercent > 0 then
-                                Remotes.InventoryUpdated:FireClient(player, inv, Locale.Format(
-                                    "StreakBonusNotification", prevStreak, bonusPercent
-                                ))
-                            end
-                            if coopBonusPercent > 0 then
-                                Remotes.InventoryUpdated:FireClient(player, inv, Locale.Format(
-                                    "TeamBonusNotice", coopBonusPercent
-                                ))
-                            end
-
-                            Remotes.ShowRaidSummary:FireClient(player, true, payout, #inv.Items, (cash and cash.Value) or 0)
-                            local currentLoadout = LoadoutService.GetActiveLoadout(player)
-                            AnalyticsService.OnPlayerEscaped(player, payout, #inv.Items, currentLoadout.Id)
-                            if player.Character and getHideoutSpawnFn then
-                                player.Character:PivotTo(getHideoutSpawnFn(player))
-                            end
                         end
                     end
-                end
 
-                for player, _ in extractingPlayers do
-                    if not inZone[player] then
-                        extractingPlayers[player] = nil
-                        Remotes.ExtractionProgress:FireClient(player, -1, false)
+                    for player, _ in extractingPlayers do
+                        if not inZone[player] then
+                            extractingPlayers[player] = nil
+                            Remotes.ExtractionProgress:FireClient(player, -1, false)
+                        end
+                    end
+
+                    local anyRemaining = false
+                    for _, player in Players:GetPlayers() do
+                        local isElim = isPlayerEliminatedFn and isPlayerEliminatedFn(player)
+                        local inv = LootService.GetInventory(player)
+                        local isEscaped = inv and inv.Escaped
+                        if not isElim and not isEscaped then
+                            anyRemaining = true
+                            break
+                        end
+                    end
+                    if not anyRemaining and #Players:GetPlayers() > 0 then
+                        break
                     end
                 end
             end
@@ -393,7 +521,10 @@ function RoundController.StartGameLoop()
                     end
                     Remotes.ShowRaidSummary:FireClient(player, false, 0, 0, (cash and cash.Value) or 0)
                     local curLoadout = LoadoutService.GetActiveLoadout(player)
-                    AnalyticsService.OnPlayerEliminated(player, "Timeout", curLoadout.Id)
+                    local alreadyEliminated = isPlayerEliminatedFn and isPlayerEliminatedFn(player)
+                    if not alreadyEliminated then
+                        AnalyticsService.OnPlayerEliminated(player, "Timeout", curLoadout.Id)
+                    end
                 end
             end
 

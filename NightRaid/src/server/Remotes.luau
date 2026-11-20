@@ -48,10 +48,22 @@ Remotes.NightEvent = getOrCreate("NightEvent", "RemoteEvent") :: RemoteEvent
 Remotes.AlertLevelChanged = getOrCreate("AlertLevelChanged", "RemoteEvent") :: RemoteEvent
 Remotes.RevivePlayer = getOrCreate("RevivePlayer", "RemoteEvent") :: RemoteEvent
 Remotes.PlayerDownedState = getOrCreate("PlayerDownedState", "RemoteEvent") :: RemoteEvent
+Remotes.ToggleCrouch = getOrCreate("ToggleCrouch", "RemoteEvent") :: RemoteEvent
+Remotes.BuyCosmetic = getOrCreate("BuyCosmetic", "RemoteEvent") :: RemoteEvent
+Remotes.EquipCosmetic = getOrCreate("EquipCosmetic", "RemoteEvent") :: RemoteEvent
+Remotes.CosmeticsUpdated = getOrCreate("CosmeticsUpdated", "RemoteEvent") :: RemoteEvent
+Remotes.TrophiesUpdated = getOrCreate("TrophiesUpdated", "RemoteEvent") :: RemoteEvent
+Remotes.BuyHideoutDeco = getOrCreate("BuyHideoutDeco", "RemoteEvent") :: RemoteEvent
+Remotes.HideoutDecoUpdated = getOrCreate("HideoutDecoUpdated", "RemoteEvent") :: RemoteEvent
+Remotes.RadioPing = getOrCreate("RadioPing", "RemoteEvent") :: RemoteEvent
+Remotes.GrappleEffect = getOrCreate("GrappleEffect", "RemoteEvent") :: RemoteEvent
+Remotes.ContractsUpdated = getOrCreate("ContractsUpdated", "RemoteEvent") :: RemoteEvent
 
 -- Functions
 Remotes.GetOwnedLoadouts = getOrCreate("GetOwnedLoadouts", "RemoteFunction") :: RemoteFunction
 Remotes.GetRaidStatus = getOrCreate("GetRaidStatus", "RemoteFunction") :: RemoteFunction
 Remotes.GetRaidReplay = getOrCreate("GetRaidReplay", "RemoteFunction") :: RemoteFunction
+Remotes.GetDailyContracts = getOrCreate("GetDailyContracts", "RemoteFunction") :: RemoteFunction
+Remotes.GetLeaderboard = getOrCreate("GetLeaderboard", "RemoteFunction") :: RemoteFunction
 
 return Remotes

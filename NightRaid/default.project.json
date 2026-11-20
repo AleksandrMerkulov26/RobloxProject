@@ -12,11 +12,15 @@
     "ServerScriptService": {
       "Server": {
         "$path": "src/server"
+      },
+      "Tests": {
+        "$path": "src/tests"
       }
     },
 
     "StarterPlayer": {
       "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
         "Client": {
           "$path": "src/client"
         }

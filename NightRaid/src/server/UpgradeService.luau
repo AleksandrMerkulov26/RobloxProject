@@ -11,6 +11,7 @@ local UpgradeService = {}
 
 function UpgradeService.Init()
     Remotes.BuyUpgrade.OnServerEvent:Connect(function(player: Player, upgradeKey: any)
+        if Remotes.CurrentPhase.Value ~= "LobbyPhase" then return end
         if type(upgradeKey) ~= "string" then return end
 
         local leaderstats = player:FindFirstChild("leaderstats")

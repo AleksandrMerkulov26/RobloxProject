@@ -105,6 +105,12 @@ local Translations: { [string]: { en: string, ru: string } } = {
     ["ContractReward"] = { en = "Reward: +$%d", ru = "Награда: +$%d" },
     ["ContractCompleted"] = { en = "COMPLETED", ru = "ВЫПОЛНЕНО" },
     ["ContractCompletedNotice"] = { en = "Contract Complete: %s! +$%d cash", ru = "Контракт выполнен: %s! +$%d на баланс" },
+    ["ContractProgress"] = { en = "Progress: %d / %d", ru = "Прогресс: %d / %d" },
+    ["TabContracts"] = { en = "CONTRACTS", ru = "КОНТРАКТЫ" },
+    ["TabLeaderboard"] = { en = "LEADERBOARD", ru = "РЕЙТИНГ" },
+    ["TabSpectate"] = { en = "SQUAD RADAR", ru = "ОТРЯД" },
+    ["LeaderboardTitle"] = { en = "WEEKLY TOP RAIDERS (CASH)", ru = "ТОП НАЛЁТЧИКОВ НЕДЕЛИ (БАЛАНС)" },
+    ["LeaderboardEmpty"] = { en = "No records yet. Be the first!", ru = "Пока нет записей. Станьте первым!" },
 
     -- Loadouts data
     ["Loadout_Default_Name"] = { en = "Rookie", ru = "Новобранец" },

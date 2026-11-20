@@ -48,6 +48,7 @@ Remotes.GetOwnedLoadouts.OnServerInvoke = function(player: Player)
 end
 
 Remotes.SelectLoadout.OnServerEvent:Connect(function(player: Player, loadoutId: any)
+    if Remotes.CurrentPhase.Value ~= "LobbyPhase" then return end
     if type(loadoutId) ~= "string" or #loadoutId > 32 then return end
 
     local targetLoadout = nil

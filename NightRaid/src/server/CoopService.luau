@@ -1,5 +1,5 @@
 --!strict
-local Players = game:GetService("Players")
+local _Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
@@ -14,15 +14,18 @@ local lastAlertUpdateTime: number = os.clock()
 local isPlayerEliminatedFn: ((player: Player) -> boolean)?
 local onPlayerFullyDiedFn: ((player: Player) -> ())?
 local getPlayerRoleFn: ((player: Player) -> string)?
+local restorePlayerSpeedFn: ((player: Player) -> ())?
 
 function CoopService.SetDependencies(deps: {
     IsPlayerEliminated: (player: Player) -> boolean,
     OnPlayerFullyDied: (player: Player) -> (),
     GetPlayerRole: (player: Player) -> string,
+    RestorePlayerSpeed: ((player: Player) -> ())?,
 })
     isPlayerEliminatedFn = deps.IsPlayerEliminated
     onPlayerFullyDiedFn = deps.OnPlayerFullyDied
     getPlayerRoleFn = deps.GetPlayerRole
+    restorePlayerSpeedFn = deps.RestorePlayerSpeed
 end
 
 function CoopService.IsDowned(player: Player): boolean
@@ -55,17 +58,67 @@ task.spawn(function()
     end
 end)
 
+local function enableRagdoll(char: Model)
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+    end
+    for _, motor in char:GetDescendants() do
+        if motor:IsA("Motor6D") and motor.Name ~= "RootJoint" then
+            local p0 = motor.Part0
+            local p1 = motor.Part1
+            if p0 and p1 then
+                local a0 = Instance.new("Attachment")
+                a0.Name = "RagdollAttach0"
+                a0.CFrame = motor.C0
+                a0.Parent = p0
+
+                local a1 = Instance.new("Attachment")
+                a1.Name = "RagdollAttach1"
+                a1.CFrame = motor.C1
+                a1.Parent = p1
+
+                local socket = Instance.new("BallSocketConstraint")
+                socket.Name = "RagdollSocket"
+                socket.Attachment0 = a0
+                socket.Attachment1 = a1
+                socket.LimitsEnabled = true
+                socket.TwistLimitsEnabled = true
+                socket.Parent = p1
+
+                motor.Enabled = false
+            end
+        end
+    end
+end
+
+local function disableRagdoll(char: Model)
+    for _, desc in char:GetDescendants() do
+        if desc.Name == "RagdollSocket" or desc.Name == "RagdollAttach0" or desc.Name == "RagdollAttach1" then
+            desc:Destroy()
+        elseif desc:IsA("Motor6D") then
+            desc.Enabled = true
+        end
+    end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end
+
 function CoopService.DownPlayer(player: Player)
     if downedPlayers[player] then return end
 
     local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+    local hum = char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum then return end
 
     player:SetAttribute("IsDowned", true)
-    hum.WalkSpeed = 3 -- Ползком
+    hum.WalkSpeed = 0
     hum.AutoRotate = false
+    enableRagdoll(char)
 
     local prompt = Instance.new("ProximityPrompt")
     prompt.Name = "RevivePrompt"
@@ -128,10 +181,19 @@ function CoopService.RevivePlayer(downedPlayer: Player, rescuer: Player)
     CoopService.ClearDowned(downedPlayer)
 
     local char = downedPlayer.Character
+    if char then
+        disableRagdoll(char)
+    end
+
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if hum then
         hum.Health = 45 -- Поднят с частью здоровья
         hum.AutoRotate = true
+        if restorePlayerSpeedFn then
+            restorePlayerSpeedFn(downedPlayer)
+        else
+            hum.WalkSpeed = 16
+        end
     end
 
     downedPlayer:SetAttribute("IsDowned", false)
@@ -150,6 +212,9 @@ function CoopService.ClearDowned(player: Player)
         downedPlayers[player] = nil
     end
     player:SetAttribute("IsDowned", false)
+    if player.Character then
+        disableRagdoll(player.Character)
+    end
 end
 
 function CoopService.CalculateCoopBonusPercent(survivingCount: number): number

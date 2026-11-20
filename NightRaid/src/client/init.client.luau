@@ -1,6 +1,7 @@
 --!strict
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
@@ -9,6 +10,7 @@ local TEST_MODE = RunService:IsStudio()
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
 local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
+local CosmeticsConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("CosmeticsConfig"))
 
 local player = Players.LocalPlayer
 
@@ -44,6 +46,18 @@ local getRaidReplayFunction = networkFolder:WaitForChild("GetRaidReplay") :: Rem
 local startRaidEvent = networkFolder:WaitForChild("StartRaid") :: RemoteEvent
 local alertLevelChangedEvent = networkFolder:WaitForChild("AlertLevelChanged") :: RemoteEvent
 local playerDownedStateEvent = networkFolder:WaitForChild("PlayerDownedState") :: RemoteEvent
+local toggleCrouchEvent = networkFolder:WaitForChild("ToggleCrouch") :: RemoteEvent
+local buyCosmeticEvent = networkFolder:WaitForChild("BuyCosmetic") :: RemoteEvent
+local equipCosmeticEvent = networkFolder:WaitForChild("EquipCosmetic") :: RemoteEvent
+local cosmeticsUpdatedEvent = networkFolder:WaitForChild("CosmeticsUpdated") :: RemoteEvent
+local trophiesUpdatedEvent = networkFolder:WaitForChild("TrophiesUpdated") :: RemoteEvent
+local radioPingEvent = networkFolder:WaitForChild("RadioPing") :: RemoteEvent
+local grappleEffectEvent = networkFolder:WaitForChild("GrappleEffect") :: RemoteEvent
+local contractsUpdatedEvent = networkFolder:WaitForChild("ContractsUpdated") :: RemoteEvent
+local _hideoutDecoUpdatedEvent = networkFolder:WaitForChild("HideoutDecoUpdated") :: RemoteEvent
+local _buyHideoutDecoEvent = networkFolder:WaitForChild("BuyHideoutDeco") :: RemoteEvent
+local getDailyContractsFunction = networkFolder:WaitForChild("GetDailyContracts") :: RemoteFunction
+local getLeaderboardFunction = networkFolder:WaitForChild("GetLeaderboard") :: RemoteFunction
 
 local currentInventoryData = { TotalValue = 0, TotalWeight = 0, Items = {} }
 local currentLoadout = Config.Loadouts[1]
@@ -51,30 +65,62 @@ local ownedLoadouts: { [string]: boolean } = { Default = true }
 local currentUpgrades = { Pockets = 0, SmokeStarter = 0, Battery = 0 }
 
 -- ==========================================
--- ЗВУКИ (SFX)
+-- ЗВУКИ (SFX С ПРЕДЗАГРУЗКОЙ И ПРИВЯЗКОЙ К КАМЕРЕ)
 -- ==========================================
-local function PlayLocalSFX(soundType: string)
-    local sound = Instance.new("Sound")
-    sound.Volume = 0.6
-    sound.Parent = SoundService
+local ContentProvider = game:GetService("ContentProvider")
+local soundCacheFolder = Instance.new("Folder")
+soundCacheFolder.Name = "SoundCache"
+soundCacheFolder.Parent = workspace.CurrentCamera
 
-    if soundType == "Grapple" then
-        sound.SoundId = "rbxassetid://9114223171"
-        sound.Pitch = 1.3
-    elseif soundType == "Alarm" then
-        sound.SoundId = "rbxassetid://9114223847"
-        sound.Pitch = 0.9
-        sound.Volume = 0.8
-    elseif soundType == "Pickup" then
-        sound.SoundId = "rbxassetid://9114221762"
-        sound.Pitch = 1.2
-    elseif soundType == "Smoke" then
-        sound.SoundId = "rbxassetid://9114222474"
-        sound.Pitch = 0.8
+local soundTemplates: { [string]: Sound } = {}
+local SFX_CONFIG: { [string]: { Id: string, Speed: number, Volume: number } } = {
+    Grapple = { Id = "rbxassetid://9120972321", Speed = 1.3, Volume = 1.2 },
+    Alarm = { Id = "rbxassetid://9119661709", Speed = 0.9, Volume = 1.5 },
+    Pickup = { Id = "rbxassetid://9116394545", Speed = 1.2, Volume = 1.4 },
+    Smoke = { Id = "rbxassetid://15675021174", Speed = 1.1, Volume = 1.1 },
+    Heartbeat = { Id = "rbxassetid://1841124374", Speed = 0.8, Volume = 1.3 },
+    RadioChirp = { Id = "rbxassetid://6667292683", Speed = 1.4, Volume = 1.3 },
+    CrouchStep = { Id = "rbxassetid://9114785786", Speed = 1.5, Volume = 0.75 },
+    TaserZap = { Id = "rbxassetid://9116275998", Speed = 1.2, Volume = 1.4 },
+}
+
+for soundType, cfg in SFX_CONFIG do
+    local s = Instance.new("Sound")
+    s.Name = soundType
+    s.SoundId = cfg.Id
+    s.PlaybackSpeed = cfg.Speed
+    s.Volume = cfg.Volume
+    s.Parent = soundCacheFolder
+    soundTemplates[soundType] = s
+end
+
+task.spawn(function()
+    local toPreload = {}
+    for _, s in soundTemplates do
+        table.insert(toPreload, s)
     end
+    pcall(function()
+        ContentProvider:PreloadAsync(toPreload)
+    end)
+end)
 
-    sound:Play()
-    sound.Ended:Connect(function() sound:Destroy() end)
+local function PlayLocalSFX(soundType: string)
+    local template = soundTemplates[soundType]
+    if not template then return end
+
+    local sound = template:Clone()
+    sound.Parent = workspace.CurrentCamera or SoundService
+    pcall(function()
+        sound:Play()
+    end)
+    sound.Ended:Connect(function()
+        sound:Destroy()
+    end)
+    task.delay(4, function()
+        if sound.Parent then
+            sound:Destroy()
+        end
+    end)
 end
 
 -- ==========================================
@@ -108,10 +154,12 @@ task.spawn(CreateCrosshair)
 -- ==========================================
 local isFlashlightOn = false
 
-local lightAnchor = workspace:FindFirstChild("ClientFlashlightRig") :: Part?
-if lightAnchor then lightAnchor:Destroy() end
+local existingLightAnchor = workspace:FindFirstChild("ClientFlashlightRig")
+if existingLightAnchor then
+    existingLightAnchor:Destroy()
+end
 
-lightAnchor = Instance.new("Part")
+local lightAnchor: Part = Instance.new("Part")
 lightAnchor.Name = "ClientFlashlightRig"
 lightAnchor.Transparency = 1
 lightAnchor.CanCollide = false
@@ -197,9 +245,20 @@ local function StopGrapple(boost: boolean)
         end
     end
 
-    if alignPos then alignPos:Destroy() alignPos = nil end
-    if activeBeam then activeBeam:Destroy() activeBeam = nil end
-    if ropePart then ropePart:Destroy() ropePart = nil end
+    if alignPos then
+        alignPos:Destroy()
+        alignPos = nil
+    end
+    if activeBeam then
+        activeBeam:Destroy()
+        activeBeam = nil
+    end
+    if ropePart then
+        ropePart:Destroy()
+        ropePart = nil
+    end
+
+    grappleEffectEvent:FireServer(Vector3.zero, false)
 end
 
 local function FireGrapple()
@@ -223,6 +282,7 @@ local function FireGrapple()
     local targetPos = hit.Position
     isGrappling = true
 
+    grappleEffectEvent:FireServer(targetPos, true)
     PlayLocalSFX("Grapple")
     makeNoiseEvent:FireServer()
 
@@ -289,6 +349,61 @@ local function FireGrapple()
     end)
 end
 
+-- Сетевая репликация троса крюка для других игроков в коопе
+local otherPlayerGrapples: { [Player]: { Rope: Part, Beam: Beam } } = {}
+
+grappleEffectEvent.OnClientEvent:Connect(function(sourcePlayer: Player, targetPos: Vector3, isActive: boolean)
+    if sourcePlayer == player then return end
+
+    local existing = otherPlayerGrapples[sourcePlayer]
+    if existing then
+        if existing.Beam then existing.Beam:Destroy() end
+        if existing.Rope then existing.Rope:Destroy() end
+        otherPlayerGrapples[sourcePlayer] = nil
+    end
+
+    if isActive then
+        local sChar = sourcePlayer.Character
+        local sRoot = sChar and sChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+        if not sRoot then return end
+
+        local rPart = Instance.new("Part")
+        rPart.Name = "NetworkRopePart"
+        rPart.Size = Vector3.new(0.5, 0.5, 0.5)
+        rPart.Position = targetPos
+        rPart.Anchored = true
+        rPart.CanCollide = false
+        rPart.Transparency = 1
+        rPart.Parent = workspace
+
+        local a0 = Instance.new("Attachment")
+        a0.Parent = sRoot
+        local a1 = Instance.new("Attachment")
+        a1.Parent = rPart
+
+        local beam = Instance.new("Beam")
+        beam.Attachment0 = a0
+        beam.Attachment1 = a1
+        beam.Width0 = 0.2
+        beam.Width1 = 0.1
+        beam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 180))
+        beam.FaceCamera = true
+        beam.LightEmission = 1
+        beam.Parent = sRoot
+
+        local sfxTemplate = soundTemplates["Grapple"]
+        if sfxTemplate then
+            local sound = sfxTemplate:Clone()
+            sound.Parent = sRoot
+            sound:Play()
+            sound.Ended:Connect(function() sound:Destroy() end)
+            task.delay(3, function() if sound.Parent then sound:Destroy() end end)
+        end
+
+        otherPlayerGrapples[sourcePlayer] = { Rope = rPart, Beam = beam }
+    end
+end)
+
 -- ==========================================
 -- ДЫМ (G)
 -- ==========================================
@@ -307,24 +422,162 @@ local function ThrowSmoke()
 end
 
 -- ==========================================
--- ОБРАБОТКА ВВОДА
+-- СКРЫТНОСТЬ И ПРИСЕДАНИЕ (C / Ctrl)
 -- ==========================================
+local isCrouched = false
+local function ToggleCrouch()
+    isCrouched = not isCrouched
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.CameraOffset = if isCrouched then Vector3.new(0, -1.2, 0) else Vector3.zero
+    end
+    toggleCrouchEvent:FireServer(isCrouched)
+    PlayLocalSFX("CrouchStep")
+end
+
+-- ==========================================
+-- ТАКТИЧЕСКИЙ РАДИО-ПИНГ (V)
+-- ==========================================
+local function TriggerRadioPing()
+    local cam = workspace.CurrentCamera
+    local ray = cam:ViewportPointToRay(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = { player.Character :: Instance }
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local hit = workspace:Raycast(ray.Origin, ray.Direction * 150, rayParams)
+    local pingPos = hit and hit.Position or (ray.Origin + ray.Direction * 60)
+    radioPingEvent:FireServer(pingPos, "Danger")
+end
+
+radioPingEvent.OnClientEvent:Connect(function(senderPlayer: Player, pingPos: Vector3, pingType: string)
+    PlayLocalSFX("RadioChirp")
+    local marker = Instance.new("Part")
+    marker.Name = "RadioPingMarker"
+    marker.Size = Vector3.new(1.2, 1.2, 1.2)
+    marker.Position = pingPos
+    marker.Transparency = 1
+    marker.Anchored = true
+    marker.CanCollide = false
+    marker.Parent = workspace
+
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.new(0, 160, 0, 36)
+    bb.StudsOffset = Vector3.new(0, 2.5, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = marker
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 1, 0)
+    lbl.Text = string.format("📍 [%s]: ОПАСНОСТЬ!", senderPlayer.DisplayName)
+    lbl.TextColor3 = Color3.fromRGB(255, 60, 60)
+    lbl.Font = Enum.Font.GothamBlack
+    lbl.TextSize = 12
+    lbl.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+    lbl.BackgroundTransparency = 0.2
+    lbl.Parent = bb
+    local crn = Instance.new("UICorner")
+    crn.CornerRadius = UDim.new(0, 6)
+    crn.Parent = lbl
+
+    task.delay(5.0, function()
+        if marker then marker:Destroy() end
+    end)
+end)
+
+-- ==========================================
+-- АТМОСФЕРНЫЙ ПУЛЬС СЕРДЦЕБИЕНИЯ (САСПЕНС)
+-- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(0.6)
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local guard = workspace:FindFirstChild("GuardNPC")
+        local guardHrp = guard and guard:FindFirstChild("HumanoidRootPart") :: BasePart?
+        if hrp and guardHrp and currentPhaseValue.Value == "LootPhase" then
+            local dist = (hrp.Position - guardHrp.Position).Magnitude
+            if dist <= 45 then
+                PlayLocalSFX("Heartbeat")
+                task.wait(math.clamp(dist / 45, 0.35, 1.0))
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- ОБРАБОТКА ВВОДА (PC, GAMEPAD & MOBILE VIA ContextActionService)
+-- ==========================================
+local function handleGrappleAction(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject)
+    if inputState == Enum.UserInputState.Begin then
+        if isGrappling then StopGrapple(false) else FireGrapple() end
+        return Enum.ContextActionResult.Sink
+    end
+    return Enum.ContextActionResult.Pass
+end
+
+local function handleFlashlightAction(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject)
+    if inputState == Enum.UserInputState.Begin then
+        ToggleFlashlight()
+        return Enum.ContextActionResult.Sink
+    end
+    return Enum.ContextActionResult.Pass
+end
+
+local function handleSmokeAction(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject)
+    if inputState == Enum.UserInputState.Begin then
+        ThrowSmoke()
+        return Enum.ContextActionResult.Sink
+    end
+    return Enum.ContextActionResult.Pass
+end
+
+local function handleCrouchAction(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject)
+    if inputState == Enum.UserInputState.Begin then
+        ToggleCrouch()
+        return Enum.ContextActionResult.Sink
+    end
+    return Enum.ContextActionResult.Pass
+end
+
+local function handleRadioPingAction(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject)
+    if inputState == Enum.UserInputState.Begin then
+        TriggerRadioPing()
+        return Enum.ContextActionResult.Sink
+    end
+    return Enum.ContextActionResult.Pass
+end
+
+ContextActionService:BindAction("GrappleAction", handleGrappleAction, true, Enum.KeyCode.Q, Enum.KeyCode.ButtonL1)
+ContextActionService:SetTitle("GrappleAction", "🪝")
+ContextActionService:SetPosition("GrappleAction", UDim2.new(1, -85, 1, -165))
+
+ContextActionService:BindAction("FlashlightAction", handleFlashlightAction, true, Enum.KeyCode.F, Enum.KeyCode.DPadUp)
+ContextActionService:SetTitle("FlashlightAction", "🔦")
+ContextActionService:SetPosition("FlashlightAction", UDim2.new(1, -85, 1, -235))
+
+ContextActionService:BindAction("SmokeAction", handleSmokeAction, true, Enum.KeyCode.G, Enum.KeyCode.DPadDown)
+ContextActionService:SetTitle("SmokeAction", "💨")
+ContextActionService:SetPosition("SmokeAction", UDim2.new(1, -155, 1, -165))
+
+ContextActionService:BindAction("CrouchAction", handleCrouchAction, true, Enum.KeyCode.C, Enum.KeyCode.LeftControl, Enum.KeyCode.ButtonB)
+ContextActionService:SetTitle("CrouchAction", "🚶")
+ContextActionService:SetPosition("CrouchAction", UDim2.new(1, -155, 1, -235))
+
+ContextActionService:BindAction("RadioPingAction", handleRadioPingAction, false, Enum.KeyCode.V, Enum.KeyCode.ButtonR3)
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
 
-    if input.KeyCode == Enum.KeyCode.Q then
-        if isGrappling then StopGrapple(false) else FireGrapple() end
-    elseif input.KeyCode == Enum.KeyCode.F then
-        ToggleFlashlight()
-    elseif input.KeyCode == Enum.KeyCode.G then
-        ThrowSmoke()
-    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+    if input.UserInputType == Enum.UserInputType.MouseButton3 then
+        TriggerRadioPing()
+    elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.KeyCode == Enum.KeyCode.ButtonR2 then
         local char = player.Character
         if char and char:FindFirstChild("Taser") then
             local cam = workspace.CurrentCamera
             local ray = cam:ViewportPointToRay(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
             fireTaserEvent:FireServer(ray.Origin + ray.Direction * 35)
-            PlayLocalSFX("Alarm")
+            PlayLocalSFX("TaserZap")
         end
     end
 end)
@@ -370,6 +623,20 @@ local function CreateMainUI()
         else
             alertLabel.TextColor3 = Color3.fromRGB(100, 255, 150)
         end
+    end)
+
+    playerDownedStateEvent.OnClientEvent:Connect(function(targetPlayer: Player, isDowned: boolean)
+        if targetPlayer == player then
+            if isDowned then
+                PlayLocalSFX("Alarm")
+            else
+                PlayLocalSFX("Pickup")
+            end
+        end
+    end)
+
+    trophiesUpdatedEvent.OnClientEvent:Connect(function(_trophies: { [string]: boolean })
+        PlayLocalSFX("Pickup")
     end)
 
     local lootLabel = Instance.new("TextLabel")
@@ -494,6 +761,8 @@ local function CreateMainUI()
     repTitle.BackgroundTransparency = 1
     repTitle.ZIndex = 81
 
+    local isPlayingReplay = false
+
     local repClose = Instance.new("TextButton")
     repClose.Parent = replayModal
     repClose.Size = UDim2.new(0, 30, 0, 30)
@@ -504,7 +773,10 @@ local function CreateMainUI()
     repClose.Font = Enum.Font.GothamBold
     repClose.ZIndex = 82
     Instance.new("UICorner", repClose).CornerRadius = UDim.new(0, 6)
-    repClose.MouseButton1Click:Connect(function() replayModal.Visible = false end)
+    repClose.MouseButton1Click:Connect(function()
+        replayModal.Visible = false
+        isPlayingReplay = false
+    end)
 
     local mapCanvas = Instance.new("Frame")
     mapCanvas.Parent = replayModal
@@ -541,8 +813,6 @@ local function CreateMainUI()
     repLegend.BackgroundTransparency = 1
     repLegend.ZIndex = 81
 
-    local isPlayingReplay = false
-
     replayButton.MouseButton1Click:Connect(function()
         local success, frames = pcall(function()
             return getRaidReplayFunction:InvokeServer()
@@ -554,7 +824,7 @@ local function CreateMainUI()
 
         task.spawn(function()
             for _, f in ipairs(frames) do
-                if not replayModal.Visible then break end
+                if not replayModal.Visible or not isPlayingReplay then break end
                 -- Преобразование мировых координат (-80..+80) в координаты канваса (0..300)
                 local px = math.clamp((f.PX + 80) / 160 * 300, 0, 300)
                 local pz = math.clamp((f.PZ + 80) / 160 * 300, 0, 300)
@@ -567,6 +837,7 @@ local function CreateMainUI()
 
                 task.wait(0.1)
             end
+            isPlayingReplay = false
         end)
     end)
 
@@ -671,13 +942,18 @@ local function CreateMainUI()
         end
     end
 
-    UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
-        if input.KeyCode == Enum.KeyCode.B then
+    local function handleInventoryAction(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject)
+        if inputState == Enum.UserInputState.Begin then
             invModal.Visible = not invModal.Visible
             if invModal.Visible then RefreshInventoryList() end
+            return Enum.ContextActionResult.Sink
         end
-    end)
+        return Enum.ContextActionResult.Pass
+    end
+
+    ContextActionService:BindAction("ToggleInventory", handleInventoryAction, true, Enum.KeyCode.B, Enum.KeyCode.DPadLeft)
+    ContextActionService:SetTitle("ToggleInventory", "🎒")
+    ContextActionService:SetPosition("ToggleInventory", UDim2.new(1, -225, 1, -165))
 
     -- Комплекты
     local loadoutModal = Instance.new("Frame")
@@ -933,6 +1209,153 @@ local function CreateMainUI()
         if marketModal.Visible then RefreshMarketUI() end
     end)
 
+    -- =========================================================================
+    -- ГАРДЕРОБ И МАГАЗИН МАСОК (Wardrobe Modal)
+    -- =========================================================================
+    local playerCosmeticsData: { Owned: { [string]: boolean }, EquippedMask: string?, EquippedGrapple: string? } = {
+        Owned = { DefaultGrapple = true },
+        EquippedMask = nil,
+        EquippedGrapple = "DefaultGrapple"
+    }
+
+    local wardrobeModal = Instance.new("Frame")
+    wardrobeModal.Name = "WardrobeModal"
+    wardrobeModal.Parent = hud
+    wardrobeModal.Size = UDim2.new(0, 540, 0, 360)
+    wardrobeModal.AnchorPoint = Vector2.new(0.5, 0.5)
+    wardrobeModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    wardrobeModal.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
+    wardrobeModal.Visible = false
+    wardrobeModal.ZIndex = 80
+    Instance.new("UICorner", wardrobeModal).CornerRadius = UDim.new(0, 12)
+
+    local wTitle = Instance.new("TextLabel")
+    wTitle.Parent = wardrobeModal
+    wTitle.Size = UDim2.new(1, -50, 0, 45)
+    wTitle.Position = UDim2.new(0, 20, 0, 8)
+    wTitle.Text = "🎭 ГАРДЕРОБ И МАГАЗИН МАСОК"
+    wTitle.TextColor3 = Color3.fromRGB(255, 140, 220)
+    wTitle.Font = Enum.Font.GothamBlack
+    wTitle.TextSize = 18
+    wTitle.TextXAlignment = Enum.TextXAlignment.Left
+    wTitle.BackgroundTransparency = 1
+    wTitle.ZIndex = 81
+
+    local wClose = Instance.new("TextButton")
+    wClose.Parent = wardrobeModal
+    wClose.Size = UDim2.new(0, 32, 0, 32)
+    wClose.Position = UDim2.new(1, -42, 0, 10)
+    wClose.Text = "X"
+    wClose.TextColor3 = Color3.fromRGB(255, 255, 255)
+    wClose.Font = Enum.Font.GothamBold
+    wClose.TextSize = 14
+    wClose.BackgroundColor3 = Color3.fromRGB(45, 50, 60)
+    wClose.ZIndex = 81
+    Instance.new("UICorner", wClose).CornerRadius = UDim.new(0, 8)
+    wClose.MouseButton1Click:Connect(function()
+        wardrobeModal.Visible = false
+    end)
+
+    local wList = Instance.new("ScrollingFrame")
+    wList.Parent = wardrobeModal
+    wList.Size = UDim2.new(1, -32, 1, -65)
+    wList.Position = UDim2.new(0, 16, 0, 55)
+    wList.BackgroundTransparency = 1
+    wList.BorderSizePixel = 0
+    wList.ScrollBarThickness = 5
+    wList.ZIndex = 81
+    local wLayout = Instance.new("UIListLayout")
+    wLayout.Padding = UDim.new(0, 8)
+    wLayout.Parent = wList
+
+    local function RefreshWardrobeUI()
+        for _, child in wList:GetChildren() do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+
+        local items = CosmeticsConfig.Items
+        for _, item in ipairs(items) do
+            local card = Instance.new("Frame")
+            card.Parent = wList
+            card.Size = UDim2.new(1, -8, 0, 65)
+            card.BackgroundColor3 = Color3.fromRGB(26, 30, 40)
+            card.ZIndex = 82
+            Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
+
+            local nameLbl = Instance.new("TextLabel")
+            nameLbl.Parent = card
+            nameLbl.Size = UDim2.new(1, -160, 0, 22)
+            nameLbl.Position = UDim2.new(0, 12, 0, 8)
+            nameLbl.Text = string.format("%s [%s]", item.Name, item.Category == "Mask" and "Маска" or "Скин крюка")
+            nameLbl.TextColor3 = Color3.fromRGB(240, 240, 250)
+            nameLbl.Font = Enum.Font.GothamBold
+            nameLbl.TextSize = 14
+            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+            nameLbl.BackgroundTransparency = 1
+            nameLbl.ZIndex = 83
+
+            local descLbl = Instance.new("TextLabel")
+            descLbl.Parent = card
+            descLbl.Size = UDim2.new(1, -160, 0, 26)
+            descLbl.Position = UDim2.new(0, 12, 0, 32)
+            descLbl.Text = item.Description
+            descLbl.TextColor3 = Color3.fromRGB(160, 170, 185)
+            descLbl.Font = Enum.Font.Gotham
+            descLbl.TextSize = 11
+            descLbl.TextXAlignment = Enum.TextXAlignment.Left
+            descLbl.TextWrapped = true
+            descLbl.BackgroundTransparency = 1
+            descLbl.ZIndex = 83
+
+            local actionBtn = Instance.new("TextButton")
+            actionBtn.Parent = card
+            actionBtn.Size = UDim2.new(0, 130, 0, 36)
+            actionBtn.Position = UDim2.new(1, -142, 0.5, -18)
+            actionBtn.Font = Enum.Font.GothamBold
+            actionBtn.TextSize = 13
+            actionBtn.ZIndex = 83
+            Instance.new("UICorner", actionBtn).CornerRadius = UDim.new(0, 6)
+
+            local isOwned = playerCosmeticsData.Owned[item.Id] == true
+            local isEquipped = (item.Category == "Mask" and playerCosmeticsData.EquippedMask == item.Id)
+                or (item.Category == "Grapple" and playerCosmeticsData.EquippedGrapple == item.Id)
+
+            if isEquipped then
+                actionBtn.Text = "★ НАДЕТО"
+                actionBtn.BackgroundColor3 = Color3.fromRGB(50, 180, 90)
+                actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                actionBtn.MouseButton1Click:Connect(function()
+                    equipCosmeticEvent:FireServer(item.Id)
+                end)
+            elseif isOwned then
+                actionBtn.Text = "НАДЕТЬ"
+                actionBtn.BackgroundColor3 = Color3.fromRGB(60, 130, 220)
+                actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                actionBtn.MouseButton1Click:Connect(function()
+                    equipCosmeticEvent:FireServer(item.Id)
+                end)
+            else
+                actionBtn.Text = string.format("КУПИТЬ ($%d)", item.Cost)
+                actionBtn.BackgroundColor3 = Color3.fromRGB(220, 150, 30)
+                actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                actionBtn.MouseButton1Click:Connect(function()
+                    buyCosmeticEvent:FireServer(item.Id)
+                end)
+            end
+        end
+
+        wList.CanvasSize = UDim2.new(0, 0, 0, #items * 74)
+    end
+
+    cosmeticsUpdatedEvent.OnClientEvent:Connect(function(newCosmetics)
+        if type(newCosmetics) == "table" then
+            playerCosmeticsData = newCosmetics
+            if wardrobeModal.Visible then
+                RefreshWardrobeUI()
+            end
+        end
+    end)
+
     local commandModal
     local RefreshCommandRoom
 
@@ -948,6 +1371,12 @@ local function CreateMainUI()
         elseif stationName == "Command" then
             commandModal.Visible = true
             RefreshCommandRoom()
+        elseif stationName == "Wardrobe" then
+            marketModal.Visible = false
+            loadoutModal.Visible = false
+            commandModal.Visible = false
+            wardrobeModal.Visible = true
+            RefreshWardrobeUI()
         end
     end)
 
@@ -955,7 +1384,7 @@ local function CreateMainUI()
     commandModal = Instance.new("Frame")
     commandModal.Name = "CommandRoomModal"
     commandModal.Parent = hud
-    commandModal.Size = UDim2.new(0, 480, 0, 340)
+    commandModal.Size = UDim2.new(0, 520, 0, 390)
     commandModal.AnchorPoint = Vector2.new(0.5, 0.5)
     commandModal.Position = UDim2.new(0.5, 0, 0.5, 0)
     commandModal.BackgroundColor3 = Color3.fromRGB(15, 23, 29)
@@ -965,7 +1394,7 @@ local function CreateMainUI()
 
     local commandTitle = Instance.new("TextLabel")
     commandTitle.Parent = commandModal
-    commandTitle.Size = UDim2.new(1, -110, 0, 42)
+    commandTitle.Size = UDim2.new(1, -170, 0, 36)
     commandTitle.Position = UDim2.new(0, 16, 0, 8)
     commandTitle.BackgroundTransparency = 1
     commandTitle.Text = Locale.Get("CommandTitle")
@@ -996,30 +1425,65 @@ local function CreateMainUI()
 
     local commandRefresh = Instance.new("TextButton")
     commandRefresh.Parent = commandModal
-    commandRefresh.Size = UDim2.new(0, 110, 0, 30)
-    commandRefresh.Position = UDim2.new(1, -164, 0, 10)
+    commandRefresh.Size = UDim2.new(0, 100, 0, 30)
+    commandRefresh.Position = UDim2.new(1, -154, 0, 10)
     commandRefresh.Text = Locale.Get("CommandRefresh")
     commandRefresh.TextColor3 = Color3.new(1, 1, 1)
     commandRefresh.BackgroundColor3 = Color3.fromRGB(45, 90, 115)
     commandRefresh.Font = Enum.Font.GothamBold
+    commandRefresh.TextSize = 12
     commandRefresh.ZIndex = 72
+
+    -- Вкладки управления (Контракты / Лидерборд / Отряд)
+    local activeCommandTab = "Contracts"
+    local tabContainer = Instance.new("Frame")
+    tabContainer.Parent = commandModal
+    tabContainer.Size = UDim2.new(1, -32, 0, 32)
+    tabContainer.Position = UDim2.new(0, 16, 0, 46)
+    tabContainer.BackgroundTransparency = 1
+    tabContainer.ZIndex = 71
+
+    local tabLayout = Instance.new("UIListLayout")
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.Padding = UDim.new(0, 8)
+    tabLayout.Parent = tabContainer
+
+    local tabBtns: { [string]: TextButton } = {}
+
+    local function createTabBtn(id: string, label: string)
+        local btn = Instance.new("TextButton")
+        btn.Name = "Tab_" .. id
+        btn.Parent = tabContainer
+        btn.Size = UDim2.new(0.31, 0, 1, 0)
+        btn.Text = label
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 12
+        btn.ZIndex = 72
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+        tabBtns[id] = btn
+        return btn
+    end
+
+    local tabContractsBtn = createTabBtn("Contracts", "📋 " .. Locale.Get("TabContracts"))
+    local tabLeaderboardBtn = createTabBtn("Leaderboard", "🏆 " .. Locale.Get("TabLeaderboard"))
+    local tabSquadBtn = createTabBtn("Squad", "📡 " .. Locale.Get("TabSpectate"))
 
     local commandStatus = Instance.new("TextLabel")
     commandStatus.Parent = commandModal
-    commandStatus.Size = UDim2.new(1, -32, 0, 24)
-    commandStatus.Position = UDim2.new(0, 16, 0, 48)
+    commandStatus.Size = UDim2.new(1, -32, 0, 20)
+    commandStatus.Position = UDim2.new(0, 16, 0, 82)
     commandStatus.BackgroundTransparency = 1
-    commandStatus.Text = Locale.Get("CommandStatusDefault")
+    commandStatus.Text = ""
     commandStatus.TextColor3 = Color3.fromRGB(180, 195, 205)
     commandStatus.Font = Enum.Font.Gotham
-    commandStatus.TextSize = 12
+    commandStatus.TextSize = 11
     commandStatus.TextXAlignment = Enum.TextXAlignment.Left
     commandStatus.ZIndex = 71
 
     local commandList = Instance.new("ScrollingFrame")
     commandList.Parent = commandModal
-    commandList.Size = UDim2.new(1, -32, 1, -88)
-    commandList.Position = UDim2.new(0, 16, 0, 78)
+    commandList.Size = UDim2.new(1, -32, 1, -112)
+    commandList.Position = UDim2.new(0, 16, 0, 104)
     commandList.BackgroundTransparency = 1
     commandList.BorderSizePixel = 0
     commandList.ScrollBarThickness = 5
@@ -1028,73 +1492,259 @@ local function CreateMainUI()
     commandLayout.Padding = UDim.new(0, 6)
     commandLayout.Parent = commandList
 
+    local function updateTabStyles()
+        for id, btn in tabBtns do
+            if id == activeCommandTab then
+                btn.BackgroundColor3 = Color3.fromRGB(40, 120, 95)
+                btn.TextColor3 = Color3.new(1, 1, 1)
+            else
+                btn.BackgroundColor3 = Color3.fromRGB(24, 32, 40)
+                btn.TextColor3 = Color3.fromRGB(160, 175, 185)
+            end
+        end
+    end
+
     RefreshCommandRoom = function()
         for _, child in commandList:GetChildren() do
             if child:IsA("Frame") then child:Destroy() end
         end
+        updateTabStyles()
 
-        local success, roster = pcall(function()
-            return getRaidStatusFunction:InvokeServer()
-        end)
-        if not success or type(roster) ~= "table" then
-            commandStatus.Text = Locale.Get("CommandFailed")
-            return
-        end
-
-        local activeCount = 0
-        for index, entry in ipairs(roster) do
-            if entry.CanSpectate then activeCount += 1 end
-            local row = Instance.new("Frame")
-            row.Parent = commandList
-            row.Size = UDim2.new(1, -8, 0, 48)
-            row.BackgroundColor3 = Color3.fromRGB(27, 37, 44)
-            row.LayoutOrder = index
-            row.ZIndex = 72
-            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
-
-            local nameLabel = Instance.new("TextLabel")
-            nameLabel.Parent = row
-            nameLabel.Size = UDim2.new(0.62, 0, 1, 0)
-            nameLabel.Position = UDim2.new(0, 12, 0, 0)
-            nameLabel.BackgroundTransparency = 1
-            nameLabel.Text = entry.DisplayName .. "  —  " .. entry.Status
-            nameLabel.TextColor3 = Color3.fromRGB(230, 235, 240)
-            nameLabel.Font = Enum.Font.GothamMedium
-            nameLabel.TextSize = 12
-            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-            nameLabel.ZIndex = 73
-
-            if entry.CanSpectate then
-                local watchButton = Instance.new("TextButton")
-                watchButton.Parent = row
-                watchButton.Size = UDim2.new(0, 112, 0, 30)
-                watchButton.Position = UDim2.new(1, -122, 0.5, -15)
-                watchButton.Text = Locale.Get("CommandSpectate")
-                watchButton.TextColor3 = Color3.new(1, 1, 1)
-                watchButton.BackgroundColor3 = Color3.fromRGB(40, 115, 85)
-                watchButton.Font = Enum.Font.GothamBold
-                watchButton.TextSize = 11
-                watchButton.ZIndex = 73
-                watchButton.MouseButton1Click:Connect(function()
-                    local target = Players:GetPlayerByUserId(entry.UserId)
-                    local targetCharacter = target and target.Character
-                    local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
-                    if targetHumanoid and targetHumanoid.Health > 0 then
-                        local camera = workspace.CurrentCamera
-                        camera.CameraSubject = targetHumanoid
-                        commandStatus.Text = Locale.Format("SpectatingTarget", entry.DisplayName)
-                    else
-                        commandStatus.Text = Locale.Get("SpectateUnavailable")
-                    end
-                end)
+        if activeCommandTab == "Contracts" then
+            commandStatus.Text = Locale.Get("ContractsModalTitle")
+            local success, data = pcall(function()
+                return getDailyContractsFunction:InvokeServer()
+            end)
+            if not success or type(data) ~= "table" or type(data.Contracts) ~= "table" then
+                commandStatus.Text = Locale.Get("CommandFailed")
+                return
             end
-        end
 
-        commandStatus.Text = Locale.Format("CommandActiveCount", activeCount)
-        commandList.CanvasSize = UDim2.new(0, 0, 0, #roster * 54)
+            local contracts = data.Contracts
+            local completedMap = data.Completed or {}
+            local progressMap = data.Progress or {}
+
+            for index, contract in ipairs(contracts) do
+                local card = Instance.new("Frame")
+                card.Parent = commandList
+                card.Size = UDim2.new(1, -8, 0, 64)
+                card.BackgroundColor3 = Color3.fromRGB(25, 34, 42)
+                card.LayoutOrder = index
+                card.ZIndex = 72
+                Instance.new("UICorner", card).CornerRadius = UDim.new(0, 6)
+
+                local isDone = completedMap[contract.Id] == true
+
+                local titleLabel = Instance.new("TextLabel")
+                titleLabel.Parent = card
+                titleLabel.Size = UDim2.new(1, -130, 0, 24)
+                titleLabel.Position = UDim2.new(0, 12, 0, 8)
+                titleLabel.BackgroundTransparency = 1
+                titleLabel.Text = contract.Title
+                titleLabel.TextColor3 = isDone and Color3.fromRGB(140, 230, 170) or Color3.fromRGB(240, 245, 250)
+                titleLabel.Font = Enum.Font.GothamBold
+                titleLabel.TextSize = 13
+                titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+                titleLabel.ZIndex = 73
+
+                local rewardLabel = Instance.new("TextLabel")
+                rewardLabel.Parent = card
+                rewardLabel.Size = UDim2.new(0.5, 0, 0, 20)
+                rewardLabel.Position = UDim2.new(0, 12, 0, 34)
+                rewardLabel.BackgroundTransparency = 1
+                rewardLabel.Text = Locale.Format("ContractReward", contract.RewardCash)
+                rewardLabel.TextColor3 = Color3.fromRGB(255, 215, 60)
+                rewardLabel.Font = Enum.Font.GothamMedium
+                rewardLabel.TextSize = 12
+                rewardLabel.TextXAlignment = Enum.TextXAlignment.Left
+                rewardLabel.ZIndex = 73
+
+                local statusBadge = Instance.new("TextLabel")
+                statusBadge.Parent = card
+                statusBadge.Size = UDim2.new(0, 110, 0, 28)
+                statusBadge.Position = UDim2.new(1, -120, 0.5, -14)
+                statusBadge.Font = Enum.Font.GothamBold
+                statusBadge.TextSize = 11
+                statusBadge.ZIndex = 73
+                Instance.new("UICorner", statusBadge).CornerRadius = UDim.new(0, 4)
+
+                if isDone then
+                    statusBadge.Text = "✔ " .. Locale.Get("ContractCompleted")
+                    statusBadge.BackgroundColor3 = Color3.fromRGB(30, 110, 65)
+                    statusBadge.TextColor3 = Color3.fromRGB(210, 255, 220)
+                else
+                    local curProg = progressMap[contract.Id] or 0
+                    statusBadge.Text = string.format("%d / %d", math.min(curProg, contract.TargetAmount), contract.TargetAmount)
+                    statusBadge.BackgroundColor3 = Color3.fromRGB(45, 55, 68)
+                    statusBadge.TextColor3 = Color3.fromRGB(210, 220, 230)
+                end
+            end
+            commandList.CanvasSize = UDim2.new(0, 0, 0, #contracts * 70)
+
+        elseif activeCommandTab == "Leaderboard" then
+            commandStatus.Text = Locale.Get("LeaderboardTitle")
+            local success, topPlayers = pcall(function()
+                return getLeaderboardFunction:InvokeServer()
+            end)
+            if not success or type(topPlayers) ~= "table" then
+                commandStatus.Text = Locale.Get("CommandFailed")
+                return
+            end
+
+            if #topPlayers == 0 then
+                local emptyLabel = Instance.new("TextLabel")
+                emptyLabel.Parent = commandList
+                emptyLabel.Size = UDim2.new(1, -8, 0, 48)
+                emptyLabel.BackgroundTransparency = 1
+                emptyLabel.Text = Locale.Get("LeaderboardEmpty")
+                emptyLabel.TextColor3 = Color3.fromRGB(160, 175, 185)
+                emptyLabel.Font = Enum.Font.Gotham
+                emptyLabel.TextSize = 13
+                emptyLabel.ZIndex = 72
+                commandList.CanvasSize = UDim2.new(0, 0, 0, 60)
+            else
+                for index, entry in ipairs(topPlayers) do
+                    local row = Instance.new("Frame")
+                    row.Parent = commandList
+                    row.Size = UDim2.new(1, -8, 0, 44)
+                    row.BackgroundColor3 = index == 1 and Color3.fromRGB(35, 45, 50) or Color3.fromRGB(25, 34, 42)
+                    row.LayoutOrder = index
+                    row.ZIndex = 72
+                    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+                    local rankColor = Color3.fromRGB(210, 220, 230)
+                    if index == 1 then
+                        rankColor = Color3.fromRGB(255, 215, 60)
+                    elseif index == 2 then
+                        rankColor = Color3.fromRGB(200, 215, 225)
+                    elseif index == 3 then
+                        rankColor = Color3.fromRGB(205, 140, 90)
+                    end
+
+                    local rankLabel = Instance.new("TextLabel")
+                    rankLabel.Parent = row
+                    rankLabel.Size = UDim2.new(0, 44, 1, 0)
+                    rankLabel.Position = UDim2.new(0, 10, 0, 0)
+                    rankLabel.BackgroundTransparency = 1
+                    rankLabel.Text = "#" .. tostring(index)
+                    rankLabel.TextColor3 = rankColor
+                    rankLabel.Font = Enum.Font.GothamBlack
+                    rankLabel.TextSize = 14
+                    rankLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    rankLabel.ZIndex = 73
+
+                    local nameLabel = Instance.new("TextLabel")
+                    nameLabel.Parent = row
+                    nameLabel.Size = UDim2.new(0.55, 0, 1, 0)
+                    nameLabel.Position = UDim2.new(0, 56, 0, 0)
+                    nameLabel.BackgroundTransparency = 1
+                    nameLabel.Text = entry.UserName or ("Player_" .. tostring(entry.UserId))
+                    nameLabel.TextColor3 = Color3.fromRGB(240, 245, 250)
+                    nameLabel.Font = Enum.Font.GothamMedium
+                    nameLabel.TextSize = 13
+                    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    nameLabel.ZIndex = 73
+
+                    local cashLabel = Instance.new("TextLabel")
+                    cashLabel.Parent = row
+                    cashLabel.Size = UDim2.new(0, 120, 1, 0)
+                    cashLabel.Position = UDim2.new(1, -130, 0, 0)
+                    cashLabel.BackgroundTransparency = 1
+                    cashLabel.Text = "$" .. tostring(entry.Value)
+                    cashLabel.TextColor3 = Color3.fromRGB(100, 225, 160)
+                    cashLabel.Font = Enum.Font.GothamBold
+                    cashLabel.TextSize = 13
+                    cashLabel.TextXAlignment = Enum.TextXAlignment.Right
+                    cashLabel.ZIndex = 73
+                end
+                commandList.CanvasSize = UDim2.new(0, 0, 0, #topPlayers * 50)
+            end
+
+        elseif activeCommandTab == "Squad" then
+            local success, roster = pcall(function()
+                return getRaidStatusFunction:InvokeServer()
+            end)
+            if not success or type(roster) ~= "table" then
+                commandStatus.Text = Locale.Get("CommandFailed")
+                return
+            end
+
+            local activeCount = 0
+            for index, entry in ipairs(roster) do
+                if entry.CanSpectate then activeCount += 1 end
+                local row = Instance.new("Frame")
+                row.Parent = commandList
+                row.Size = UDim2.new(1, -8, 0, 48)
+                row.BackgroundColor3 = Color3.fromRGB(27, 37, 44)
+                row.LayoutOrder = index
+                row.ZIndex = 72
+                Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+                local nameLabel = Instance.new("TextLabel")
+                nameLabel.Parent = row
+                nameLabel.Size = UDim2.new(0.62, 0, 1, 0)
+                nameLabel.Position = UDim2.new(0, 12, 0, 0)
+                nameLabel.BackgroundTransparency = 1
+                nameLabel.Text = entry.DisplayName .. "  —  " .. entry.Status
+                nameLabel.TextColor3 = Color3.fromRGB(230, 235, 240)
+                nameLabel.Font = Enum.Font.GothamMedium
+                nameLabel.TextSize = 12
+                nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                nameLabel.ZIndex = 73
+
+                if entry.CanSpectate then
+                    local watchButton = Instance.new("TextButton")
+                    watchButton.Parent = row
+                    watchButton.Size = UDim2.new(0, 112, 0, 30)
+                    watchButton.Position = UDim2.new(1, -122, 0.5, -15)
+                    watchButton.Text = Locale.Get("CommandSpectate")
+                    watchButton.TextColor3 = Color3.new(1, 1, 1)
+                    watchButton.BackgroundColor3 = Color3.fromRGB(40, 115, 85)
+                    watchButton.Font = Enum.Font.GothamBold
+                    watchButton.TextSize = 11
+                    watchButton.ZIndex = 73
+                    watchButton.MouseButton1Click:Connect(function()
+                        local target = Players:GetPlayerByUserId(entry.UserId)
+                        local targetCharacter = target and target.Character
+                        local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
+                        if targetHumanoid and targetHumanoid.Health > 0 then
+                            local camera = workspace.CurrentCamera
+                            camera.CameraSubject = targetHumanoid
+                            commandStatus.Text = Locale.Format("SpectatingTarget", entry.DisplayName)
+                        else
+                            commandStatus.Text = Locale.Get("SpectateUnavailable")
+                        end
+                    end)
+                end
+            end
+
+            commandStatus.Text = Locale.Format("CommandActiveCount", activeCount)
+            commandList.CanvasSize = UDim2.new(0, 0, 0, #roster * 54)
+        end
     end
 
+    tabContractsBtn.MouseButton1Click:Connect(function()
+        activeCommandTab = "Contracts"
+        RefreshCommandRoom()
+    end)
+
+    tabLeaderboardBtn.MouseButton1Click:Connect(function()
+        activeCommandTab = "Leaderboard"
+        RefreshCommandRoom()
+    end)
+
+    tabSquadBtn.MouseButton1Click:Connect(function()
+        activeCommandTab = "Squad"
+        RefreshCommandRoom()
+    end)
+
     commandRefresh.MouseButton1Click:Connect(RefreshCommandRoom)
+
+    contractsUpdatedEvent.OnClientEvent:Connect(function()
+        if commandModal.Visible and activeCommandTab == "Contracts" then
+            RefreshCommandRoom()
+        end
+    end)
 
     loadoutAppliedEvent.OnClientEvent:Connect(function(appliedLoadout, appliedUpgrades)
         currentLoadout = appliedLoadout

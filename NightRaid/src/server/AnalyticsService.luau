@@ -25,15 +25,43 @@ local function safeLogCustom(player: Player?, eventName: string, value: number?,
     end
 end
 
+local pendingCounters: { [string]: number } = {}
+
 local function incrementCounter(statName: string, amount: number?)
     local amt = amount or 1
-    if AnalyticsStore and not isStudio then
-        task.spawn(function()
-            pcall(function()
-                AnalyticsStore:IncrementAsync(statName, amt)
-            end)
-        end)
+    pendingCounters[statName] = (pendingCounters[statName] or 0) + amt
+end
+
+local function flushCounters()
+    if isStudio or not AnalyticsStore then
+        pendingCounters = {}
+        return
     end
+
+    local snapshot = pendingCounters
+    pendingCounters = {}
+
+    for statName, amt in pairs(snapshot) do
+        if amt > 0 then
+            task.spawn(function()
+                pcall(function()
+                    AnalyticsStore:IncrementAsync(statName, amt)
+                end)
+            end)
+        end
+    end
+end
+
+-- Периодический сброс счётчиков каждые 60 секунд для исключения троттлинга DataStore
+task.spawn(function()
+    while true do
+        task.wait(60)
+        flushCounters()
+    end
+end)
+
+function ServerAnalytics.Flush()
+    flushCounters()
 end
 
 function ServerAnalytics.OnRaidStarted(playerCount: number, nightEventId: string)

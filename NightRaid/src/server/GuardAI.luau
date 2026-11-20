@@ -142,8 +142,10 @@ function GuardAI.SpawnCamera(mountPos: Vector3, baseDirection: Vector3)
                 if hrp and hum and hum.Health > 0 and not (isPlayerEliminatedFn and isPlayerEliminatedFn(player)) then
                     local offset = hrp.Position - headPart.Position
                     local dist = offset.Magnitude
+                    local isCrouched = player:GetAttribute("IsCrouched") == true
+                    local maxCamDist = if isCrouched then 26 else 38
 
-                    if dist <= 38 then
+                    if dist <= maxCamDist then
                         local dirToPlayer = offset.Unit
                         local dot = forward:Dot(dirToPlayer)
 
@@ -220,6 +222,40 @@ function GuardAI.SpawnPatrolDog(spawnPos: Vector3): Model
     model.Parent = securityContainer or workspace
 
     task.spawn(function()
+        local function DogNavigateTo(dest: Vector3)
+            local offset = dest - root.Position
+            if offset.Magnitude <= 6 then
+                humanoid:MoveTo(dest)
+                return
+            end
+
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = { model, securityContainer }
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            local hit = workspace:Raycast(root.Position, offset, rayParams)
+
+            if not hit or (hit.Position - dest).Magnitude <= 4 then
+                humanoid:MoveTo(dest)
+            else
+                local path = PathfindingService:CreatePath({
+                    AgentRadius = 1.5,
+                    AgentHeight = 3.0,
+                    AgentCanJump = false,
+                })
+                local success = pcall(function() path:ComputeAsync(root.Position, dest) end)
+                if success and path.Status == Enum.PathStatus.Success then
+                    local points = path:GetWaypoints()
+                    if #points >= 2 then
+                        humanoid:MoveTo(points[2].Position)
+                    else
+                        humanoid:MoveTo(dest)
+                    end
+                else
+                    humanoid:MoveTo(dest)
+                end
+            end
+        end
+
         local patrolTarget = spawnPos + Vector3.new(math.random(-25, 25), 0, math.random(-25, 25))
 
         while model.Parent and humanoid.Health > 0 do
@@ -258,8 +294,8 @@ function GuardAI.SpawnPatrolDog(spawnPos: Vector3): Model
             if targetPlayerRoot then
                 -- Погоня и укус
                 humanoid.WalkSpeed = 23
-                humanoid:MoveTo(targetPlayerRoot.Position)
-                if (targetPlayerRoot.Position - root.Position).Magnitude <= 4 then
+                DogNavigateTo(targetPlayerRoot.Position)
+                if (targetPlayerRoot.Position - root.Position).Magnitude <= 5 then
                     local targetHum = targetPlayerRoot.Parent and targetPlayerRoot.Parent:FindFirstChildOfClass("Humanoid")
                     if targetHum then
                         targetHum:TakeDamage(15)
@@ -269,13 +305,13 @@ function GuardAI.SpawnPatrolDog(spawnPos: Vector3): Model
                 end
             elseif hearingTarget then
                 -- Бежит к шуму
-                humanoid:MoveTo(hearingTarget)
+                DogNavigateTo(hearingTarget)
                 if (root.Position - hearingTarget).Magnitude <= 6 then
                     task.wait(1.0)
                 end
             else
                 -- Патруль
-                humanoid:MoveTo(patrolTarget)
+                DogNavigateTo(patrolTarget)
                 if (root.Position - patrolTarget).Magnitude <= 6 then
                     patrolTarget = spawnPos + Vector3.new(math.random(-35, 35), 0, math.random(-35, 35))
                     task.wait(1.0)
@@ -290,7 +326,7 @@ end
 -- ========================================================
 -- 3. ОСНОВНОЙ ОХРАННИК (GuardNPC)
 -- ========================================================
-function GuardAI.SpawnGuard(spawnPos: Vector3): Model
+function GuardAI.SpawnGuard(spawnPos: Vector3, customWaypoints: { Vector3 }?): Model
     local oldGuard = workspace:FindFirstChild("GuardNPC")
     if oldGuard then oldGuard:Destroy() end
     guardAlertUntil = 0
@@ -357,7 +393,7 @@ function GuardAI.SpawnGuard(spawnPos: Vector3): Model
     model.Parent = workspace
     activeGuardModel = model
 
-    local waypoints = {
+    local waypoints = customWaypoints or {
         Vector3.new(-45, 3, -45),
         Vector3.new(45, 3, -45),
         Vector3.new(50, 3, -15),
@@ -373,19 +409,52 @@ function GuardAI.SpawnGuard(spawnPos: Vector3): Model
     local searchMoveIssued = false
     local SEARCH_DURATION = 7
 
+    local lastPathComputeTime = 0
+    local cachedPathWaypoints: { PathWaypoint } = {}
+    local currentPathWaypointIndex = 2
+    local cachedPathTarget: Vector3? = nil
+
     local function NavigateTo(dest: Vector3)
-        local path = PathfindingService:CreatePath({ AgentRadius = 2.5, AgentHeight = 5, AgentCanJump = false })
-        local success = pcall(function() path:ComputeAsync(root.Position, dest) end)
-        if success and path.Status == Enum.PathStatus.Success then
-            local points = path:GetWaypoints()
-            for i = 2, math.min(#points, 4) do
-                if not model.Parent or humanoid.Health <= 0 then break end
-                humanoid:MoveTo(points[i].Position)
-                task.wait(0.35)
-            end
-        else
+        local offset = dest - root.Position
+        if offset.Magnitude <= 6 then
             humanoid:MoveTo(dest)
-            task.wait(0.35)
+            return
+        end
+
+        local rayParams = RaycastParams.new()
+        rayParams.FilterDescendantsInstances = { model, securityContainer }
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = workspace:Raycast(root.Position, offset, rayParams)
+
+        if not hit or (hit.Position - dest).Magnitude <= 4 then
+            humanoid:MoveTo(dest)
+            cachedPathTarget = nil
+            cachedPathWaypoints = {}
+        else
+            local now = os.clock()
+            local targetMoved = not cachedPathTarget or (cachedPathTarget - dest).Magnitude > 6
+            if targetMoved or (now - lastPathComputeTime) > 2.0 then
+                lastPathComputeTime = now
+                cachedPathTarget = dest
+                currentPathWaypointIndex = 2
+                local path = PathfindingService:CreatePath({ AgentRadius = 2.5, AgentHeight = 5, AgentCanJump = false })
+                local success = pcall(function() path:ComputeAsync(root.Position, dest) end)
+                if success and path.Status == Enum.PathStatus.Success then
+                    cachedPathWaypoints = path:GetWaypoints()
+                else
+                    cachedPathWaypoints = {}
+                end
+            end
+
+            if #cachedPathWaypoints >= currentPathWaypointIndex then
+                local nextPoint = cachedPathWaypoints[currentPathWaypointIndex]
+                humanoid:MoveTo(nextPoint.Position)
+                if (root.Position - nextPoint.Position).Magnitude <= 4 then
+                    currentPathWaypointIndex += 1
+                end
+            else
+                humanoid:MoveTo(dest)
+            end
         end
     end
 
@@ -441,14 +510,18 @@ function GuardAI.SpawnGuard(spawnPos: Vector3): Model
                     local smokeBlocksVision = LootLogic.IsVisionBlockedBySmoke(
                         smokePositions, root.Position, playerRoot.Position, 14
                     )
+                    local isCrouched = player:GetAttribute("IsCrouched") == true
+                    local effViewDist = if isCrouched then awareness.ViewDistance * 0.6 else awareness.ViewDistance
+                    local effProxDist = if isCrouched then 5 else 12
+
                     if not smokeBlocksVision
                         and LootLogic.IsPlayerDetected(
                             root.Position,
                             root.CFrame.LookVector,
                             playerRoot.Position,
-                            awareness.ViewDistance,
+                            effViewDist,
                             awareness.FovDotThreshold,
-                            12
+                            effProxDist
                         ) then
                         local rayParams = RaycastParams.new()
                         rayParams.FilterDescendantsInstances = { model, char, smokesContainer }

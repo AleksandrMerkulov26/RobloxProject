@@ -1,5 +1,5 @@
 --!strict
-local Players = game:GetService("Players")
+local _Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
@@ -9,19 +9,26 @@ local Remotes = require(script.Parent:WaitForChild("Remotes"))
 
 local LootService = {}
 
-local lootContainer = workspace:FindFirstChild("LootItems") :: Folder?
-if not lootContainer then
-    lootContainer = Instance.new("Folder")
-    lootContainer.Name = "LootItems"
-    lootContainer.Parent = workspace
+local existingContainer = workspace:FindFirstChild("LootItems")
+local lootContainer: Folder
+if existingContainer and existingContainer:IsA("Folder") then
+    lootContainer = existingContainer
+else
+    local folder = Instance.new("Folder")
+    folder.Name = "LootItems"
+    folder.Parent = workspace
+    lootContainer = folder
 end
 
 export type ItemData = {
+    Id: string?,
     Name: string,
+    NameKey: string?,
     Value: number,
     Weight: number,
     Color: Color3,
     Fragile: boolean?,
+    Tier: string?,
 }
 
 export type InventoryData = {
@@ -37,15 +44,18 @@ local playerInventories: { [Player]: InventoryData } = {}
 local getEffectiveMaxWeightFn: ((player: Player) -> number)?
 local getActiveLoadoutFn: ((player: Player) -> any)?
 local isPlayerEliminatedFn: ((player: Player) -> boolean)?
+local isPlayerDownedFn: ((player: Player) -> boolean)?
 
 function LootService.SetDependencies(deps: {
     GetEffectiveMaxWeight: (player: Player) -> number,
     GetActiveLoadout: (player: Player) -> any,
     IsPlayerEliminated: (player: Player) -> boolean,
+    IsPlayerDowned: ((player: Player) -> boolean)?,
 })
     getEffectiveMaxWeightFn = deps.GetEffectiveMaxWeight
     getActiveLoadoutFn = deps.GetActiveLoadout
     isPlayerEliminatedFn = deps.IsPlayerEliminated
+    isPlayerDownedFn = deps.IsPlayerDowned
 end
 
 function LootService.GetInventory(player: Player): InventoryData?
@@ -104,10 +114,18 @@ function LootService.SpawnLootItem(lootData: ItemData, spawnPosition: Vector3)
     prompt.RequiresLineOfSight = false
     prompt.Parent = itemPart
 
+    local isClaimed = false
+
     prompt.Triggered:Connect(function(player: Player)
+        if isClaimed then return end
+
+        local phase = Remotes.CurrentPhase.Value
+        if phase ~= "LootPhase" and phase ~= "ExtractionPhase" then return end
+
         local inv = playerInventories[player]
         if not inv or inv.Escaped then return end
         if isPlayerEliminatedFn and isPlayerEliminatedFn(player) then return end
+        if isPlayerDownedFn and isPlayerDownedFn(player) then return end
 
         local effectiveMaxWeight = getEffectiveMaxWeightFn and getEffectiveMaxWeightFn(player) or Config.MaxInventoryWeight
         local currentLoadout = getActiveLoadoutFn and getActiveLoadoutFn(player) or Config.Loadouts[1]
@@ -116,6 +134,9 @@ function LootService.SpawnLootItem(lootData: ItemData, spawnPosition: Vector3)
             Remotes.InventoryUpdated:FireClient(player, inv, Locale.Get("BackpackFull"))
             return
         end
+
+        isClaimed = true
+        prompt.Enabled = false
 
         table.insert(inv.Items, lootData)
         inv.TotalWeight += lootData.Weight

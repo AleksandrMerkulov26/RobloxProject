@@ -3,20 +3,32 @@ local Players = game:GetService("Players")
 
 local LearningGuardService = {}
 
--- Тепловая карта популярности зон склада (сетка 4x4)
--- Сетка от -80 до +80 по X и Z с шагом 40 studs
+-- Тепловая карта популярности зон склада (адаптивная сетка 4x4)
 local zoneHeatMap: { [string]: number } = {}
 local currentRaidPositions: { Vector3 } = {}
+local currentFloorSize: Vector3 = Vector3.new(160, 10, 160)
+
+function LearningGuardService.SetMapFloorSize(floorSize: Vector3)
+    currentFloorSize = floorSize
+end
 
 local function getZoneKey(pos: Vector3): string
-    local cellX = math.clamp(math.floor((pos.X + 80) / 40), 0, 3)
-    local cellZ = math.clamp(math.floor((pos.Z + 80) / 40), 0, 3)
+    local halfX = currentFloorSize.X / 2
+    local halfZ = currentFloorSize.Z / 2
+    local stepX = currentFloorSize.X / 4
+    local stepZ = currentFloorSize.Z / 4
+    local cellX = math.clamp(math.floor((pos.X + halfX) / stepX), 0, 3)
+    local cellZ = math.clamp(math.floor((pos.Z + halfZ) / stepZ), 0, 3)
     return string.format("%d_%d", cellX, cellZ)
 end
 
 local function getZoneCenter(cellX: number, cellZ: number): Vector3
-    local x = -80 + (cellX * 40) + 20
-    local z = -80 + (cellZ * 40) + 20
+    local halfX = currentFloorSize.X / 2
+    local halfZ = currentFloorSize.Z / 2
+    local stepX = currentFloorSize.X / 4
+    local stepZ = currentFloorSize.Z / 4
+    local x = -halfX + (cellX * stepX) + (stepX / 2)
+    local z = -halfZ + (cellZ * stepZ) + (stepZ / 2)
     return Vector3.new(x, 3, z)
 end
 

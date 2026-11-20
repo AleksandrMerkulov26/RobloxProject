@@ -153,11 +153,82 @@ function HideoutBuilder.Build(userId: number, slot: number, savedData: any): (Mo
     local _, armoryPrompt = addZone(model, "Armory", Locale.Get("StationArmory"), Vector3.new(x - 17, y + 2.2, z - 10), COLORS.warm, "Armory")
     local _, workshopPrompt = addZone(model, "Workshop", Locale.Get("StationWorkshop"), Vector3.new(x + 17, y + 2.2, z - 10), COLORS.blue, "Workshop")
     local _, commandPrompt = addZone(model, "Command", Locale.Get("StationCommand"), Vector3.new(x - 17, y + 2.2, z + 13), COLORS.green, "Command")
-    addZone(model, "Living", Locale.Get("StationLiving"), Vector3.new(x + 17, y + 2.2, z + 13), Color3.fromRGB(185, 140, 220), "Living")
+    local _, wardrobePrompt = addZone(model, "Wardrobe", "Магазин масок и гардероб", Vector3.new(x + 17, y + 2.2, z + 13), Color3.fromRGB(185, 140, 220), "Wardrobe")
 
     stationPrompts.Armory = armoryPrompt
     stationPrompts.Workshop = workshopPrompt
     stationPrompts.Command = commandPrompt
+    stationPrompts.Wardrobe = wardrobePrompt
+
+    -- Неоновая вывеска синдиката над базой
+    local signPart = createPart(model, "NeonSign", Vector3.new(24, 2, 0.4), Vector3.new(x, y + 15, z - 25), Color3.fromRGB(255, 140, 40), Enum.Material.Neon)
+    local signBB = Instance.new("BillboardGui")
+    signBB.Size = UDim2.new(0, 320, 0, 50)
+    signBB.AlwaysOnTop = false
+    signBB.Parent = signPart
+    local signLabel = Instance.new("TextLabel")
+    signLabel.Size = UDim2.new(1, 0, 1, 0)
+    signLabel.Text = "★ NIGHT RAID: SYNDICATE DEN ★"
+    signLabel.TextColor3 = Color3.fromRGB(255, 230, 120)
+    signLabel.Font = Enum.Font.GothamBlack
+    signLabel.TextSize = 16
+    signLabel.BackgroundTransparency = 1
+    signLabel.Parent = signBB
+
+    -- Диван и столик в зоне отдыха
+    createPart(model, "LivingSofa", Vector3.new(10, 2.5, 4), Vector3.new(x + 22, y + 3.2, z + 18), Color3.fromRGB(45, 30, 25), Enum.Material.Leather)
+    createPart(model, "LivingTable", Vector3.new(6, 1.8, 3), Vector3.new(x + 22, y + 2.9, z + 13), Color3.fromRGB(60, 45, 35), Enum.Material.Wood)
+
+    -- =========================================================================
+    -- ВИЗУАЛЬНАЯ ТРОФЕЙНАЯ ВИТРИНА (Trophy Pedestals)
+    -- =========================================================================
+    local trophies = savedData.Trophies or {}
+    local trophyList = {
+        { Id = "Crown", Name = "Корона Синдиката", Color = Color3.fromRGB(255, 215, 0), Pos = Vector3.new(x - 12, y + 3, z - 21) },
+        { Id = "GoldBar", Name = "Золотой слиток", Color = Color3.fromRGB(255, 190, 30), Pos = Vector3.new(x - 4, y + 3, z - 21) },
+        { Id = "DiamondNecklace", Name = "Алмазное колье", Color = Color3.fromRGB(180, 255, 255), Pos = Vector3.new(x + 4, y + 3, z - 21) },
+        { Id = "PrototypeLaser", Name = "Прототип лазера", Color = Color3.fromRGB(255, 50, 100), Pos = Vector3.new(x + 12, y + 3, z - 21) },
+    }
+
+    for _, tData in ipairs(trophyList) do
+        -- Мраморный постамент
+        createPart(model, "Pedestal_" .. tData.Id, Vector3.new(3, 3, 3), tData.Pos, Color3.fromRGB(30, 33, 40), Enum.Material.Marble)
+        -- Стеклянный колпак
+        createPart(model, "GlassCover_" .. tData.Id, Vector3.new(2.8, 2.6, 2.8), tData.Pos + Vector3.new(0, 2.8, 0), Color3.fromRGB(200, 230, 255), Enum.Material.Glass, { transparency = 0.7, canCollide = false })
+
+        -- Подсветка постамента
+        local pLight = Instance.new("PointLight")
+        pLight.Range = 8
+        pLight.Brightness = 1.5
+        pLight.Color = tData.Color
+        pLight.Parent = model:FindFirstChild("Pedestal_" .. tData.Id)
+
+        local isUnlocked = trophies[tData.Id] == true
+        local trophyItem = createPart(
+            model,
+            "TrophyItem_" .. tData.Id,
+            Vector3.new(1.2, 1.2, 1.2),
+            tData.Pos + Vector3.new(0, 2.5, 0),
+            isUnlocked and tData.Color or Color3.fromRGB(60, 65, 75),
+            isUnlocked and Enum.Material.Neon or Enum.Material.Metal,
+            { transparency = isUnlocked and 0 or 0.7, canCollide = false }
+        )
+
+        local tBB = Instance.new("BillboardGui")
+        tBB.Size = UDim2.new(0, 120, 0, 25)
+        tBB.StudsOffset = Vector3.new(0, 2.2, 0)
+        tBB.AlwaysOnTop = true
+        tBB.Parent = trophyItem
+
+        local tLabel = Instance.new("TextLabel")
+        tLabel.Size = UDim2.new(1, 0, 1, 0)
+        tLabel.Text = isUnlocked and string.format("★ %s ★", tData.Name) or string.format("[🔒 %s]", tData.Name)
+        tLabel.TextColor3 = isUnlocked and Color3.fromRGB(255, 230, 100) or Color3.fromRGB(150, 150, 160)
+        tLabel.Font = Enum.Font.GothamBold
+        tLabel.TextSize = 11
+        tLabel.BackgroundTransparency = 1
+        tLabel.Parent = tBB
+    end
 
     local counter = createPart(model, "DealerCounter", Vector3.new(8, 3, 2), Vector3.new(x, y + 3.5, z - 23), Color3.fromRGB(75, 49, 31), Enum.Material.Wood)
     local prompt = Instance.new("ProximityPrompt")

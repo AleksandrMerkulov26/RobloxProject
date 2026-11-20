@@ -7,6 +7,7 @@ Players.CharacterAutoLoads = false
 local LootLogic = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LootLogic"))
 local RaidProgression = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RaidProgression"))
 local Locale = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locale"))
+local ContractService = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ContractService"))
 
 local Remotes = require(script:WaitForChild("Remotes"))
 local DataService = require(script:WaitForChild("DataService"))
@@ -19,9 +20,12 @@ local HideoutBuilder = require(script:WaitForChild("HideoutBuilder"))
 local AnalyticsService = require(script:WaitForChild("AnalyticsService"))
 local CoopService = require(script:WaitForChild("CoopService"))
 local ReplayService = require(script:WaitForChild("ReplayService"))
+local CosmeticsService = require(script:WaitForChild("CosmeticsService"))
+local LeaderboardService = require(script:WaitForChild("LeaderboardService"))
 
 -- Инициализация систем
 UpgradeService.Init()
+CosmeticsService.Init()
 RoundController.InitFacility()
 
 -- Убежища и элиминации
@@ -30,6 +34,7 @@ local playerHideoutSlots: { [Player]: number } = {}
 local hideoutSlotOwners: { [number]: Player? } = {}
 local eliminatedPlayers: { [Player]: boolean } = {}
 local remoteActionTimes: { [Player]: { [string]: number } } = {}
+local playerSmokeCharges: { [Player]: number } = {}
 
 local existingSmokes = workspace:FindFirstChild("Smokes")
 local smokesContainer: Folder
@@ -44,10 +49,25 @@ end
 
 local function loadCharacterForPlayer(player: Player)
     if player.Parent == Players then
-        pcall(function()
+        local success, err = pcall(function()
             player:LoadCharacterAsync()
         end)
+        if not success then
+            pcall(function()
+                (player :: any):LoadCharacter()
+            end)
+            if err then
+                warn(string.format("[Raid] Предупреждение спавна для %s: %s", player.Name, tostring(err)))
+            end
+        end
     end
+end
+
+local function isFiniteVector3(v: any): boolean
+    return typeof(v) == "Vector3"
+        and v.X == v.X and math.abs(v.X) < 100000
+        and v.Y == v.Y and math.abs(v.Y) < 100000
+        and v.Z == v.Z and math.abs(v.Z) < 100000
 end
 
 local function canPerformAction(player: Player, actionName: string, cooldown: number): boolean
@@ -87,6 +107,7 @@ LootService.SetDependencies({
     GetEffectiveMaxWeight = getEffectiveMaxWeight,
     GetActiveLoadout = function(player: Player) return LoadoutService.GetActiveLoadout(player) end,
     IsPlayerEliminated = isPlayerEliminated,
+    IsPlayerDowned = function(player: Player) return CoopService.IsDowned(player) end,
 })
 
 GuardAI.SetDependencies({
@@ -103,10 +124,13 @@ RoundController.SetDependencies({
         local curLoadout = LoadoutService.GetActiveLoadout(player)
         LoadoutService.ApplyLoadout(player, curLoadout)
 
+        local upg = DataService.GetUpgrades(player)
+        playerSmokeCharges[player] = 1 + (upg.SmokeStarter or 0)
+
         local character = player.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         if not humanoid or humanoid.Health <= 0 then
-            pcall(function() player:LoadCharacterAsync() end)
+            loadCharacterForPlayer(player)
         end
     end,
     GetHideoutSpawn = getHideoutSpawn,
@@ -160,6 +184,21 @@ CoopService.SetDependencies({
         local loadout = LoadoutService.GetActiveLoadout(player)
         return loadout.Role or "Default"
     end,
+    RestorePlayerSpeed = function(player: Player)
+        local inv = LootService.GetInventory(player)
+        local curLoadout = LoadoutService.GetActiveLoadout(player)
+        local effMaxWeight = getEffectiveMaxWeight(player)
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = LootLogic.CalculateWalkSpeed(
+                inv and inv.TotalWeight or 0,
+                effMaxWeight,
+                curLoadout.WalkSpeed,
+                8
+            )
+        end
+    end,
 })
 
 local function InitPlayer(player: Player)
@@ -194,8 +233,14 @@ local function InitPlayer(player: Player)
     LootService.InitPlayer(player)
     LoadoutService.InitPlayer(player)
 
+    Remotes.CosmeticsUpdated:FireClient(player, DataService.GetCosmetics(player))
+    Remotes.TrophiesUpdated:FireClient(player, DataService.GetTrophies(player))
+    Remotes.ContractsUpdated:FireClient(player, DataService.GetContracts(player))
+    Remotes.HideoutDecoUpdated:FireClient(player, DataService.GetHideoutDecos(player))
+
     player.CharacterAdded:Connect(function(char: Model)
         task.wait(0.2)
+        CosmeticsService.ApplyCosmetics(player)
         if Remotes.CurrentPhase.Value == "LobbyPhase" or eliminatedPlayers[player] then
             char:PivotTo(getHideoutSpawn(player))
         else
@@ -204,20 +249,49 @@ local function InitPlayer(player: Player)
 
         local hum = char:WaitForChild("Humanoid") :: Humanoid
         local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
+        hum.BreakJointsOnDeath = false
         local activeLoadout = LoadoutService.GetActiveLoadout(player)
         hum.WalkSpeed = activeLoadout.WalkSpeed
+
+        hum.HealthChanged:Connect(function(health)
+            if health <= 1 and not isPlayerEliminated(player) then
+                if CoopService.IsDowned(player) then
+                    -- Добивание: получение урона в нокауте окончательно устраняет игрока
+                    CoopService.ClearDowned(player)
+                    handlePlayerElimination(player, hrp.Position)
+                    return
+                end
+
+                local phase = Remotes.CurrentPhase.Value
+                local raidIsActive = RaidProgression.ShouldEliminate(phase)
+                local inv = LootService.GetInventory(player)
+                local isEscaped = inv and inv.Escaped
+
+                if raidIsActive and not isEscaped then
+                    hum.Health = 1
+                    CoopService.DownPlayer(player)
+                end
+            end
+        end)
 
         hum.Died:Connect(function()
             local phase = Remotes.CurrentPhase.Value
             local raidIsActive = RaidProgression.ShouldEliminate(phase)
+            local inv = LootService.GetInventory(player)
+            local isEscaped = inv and inv.Escaped
 
-            if raidIsActive and not CoopService.IsDowned(player) then
-                -- Во время рейда сначала отправляем игрока в нокаут для помощи от напарников
-                hum.Health = 1
-                CoopService.DownPlayer(player)
-            else
-                handlePlayerElimination(player, hrp.Position)
+            -- Если смерть произошла вне рейда (в лобби, после побега или при повторном падении на базе)
+            if not raidIsActive or isEscaped or eliminatedPlayers[player] then
+                task.delay(2, function()
+                    if player.Parent == Players then
+                        loadCharacterForPlayer(player)
+                    end
+                end)
+                return
             end
+
+            -- Смерть в рейде (сброс персонажа через меню или падение в бездну)
+            handlePlayerElimination(player, hrp.Position)
         end)
 
         local fallY = 0
@@ -292,10 +366,24 @@ Remotes.GetRaidReplay.OnServerInvoke = function(player: Player)
     return ReplayService.GetReplayDataForPlayer(player.UserId)
 end
 
+Remotes.GetDailyContracts.OnServerInvoke = function(player: Player)
+    local contracts = ContractService.GetDailyContracts()
+    local playerData = DataService.GetContracts(player)
+    return {
+        Contracts = contracts,
+        Completed = playerData.Completed,
+        Progress = playerData.Progress,
+    }
+end
+
+Remotes.GetLeaderboard.OnServerInvoke = function(_player: Player)
+    return LeaderboardService.GetTopPlayers()
+end
+
 -- Действия игрока: Тайзер, Дым, Шум
 Remotes.FireTaser.OnServerEvent:Connect(function(player: Player, targetPos: any)
-    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
-    if typeof(targetPos) ~= "Vector3" then return end
+    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] or CoopService.IsDowned(player) then return end
+    if not isFiniteVector3(targetPos) then return end
     if not canPerformAction(player, "FireTaser", 1.0) then return end
 
     local char = player.Character
@@ -326,8 +414,19 @@ Remotes.FireTaser.OnServerEvent:Connect(function(player: Player, targetPos: any)
 end)
 
 Remotes.ThrowSmoke.OnServerEvent:Connect(function(player: Player)
-    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
+    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] or CoopService.IsDowned(player) then return end
+
+    local charges = playerSmokeCharges[player] or 0
+    if charges <= 0 then
+        local inv = LootService.GetInventory(player)
+        if inv then
+            Remotes.InventoryUpdated:FireClient(player, inv, "[!] Дымовые шашки закончились!")
+        end
+        return
+    end
+
     if not canPerformAction(player, "ThrowSmoke", 10.0) then return end
+    playerSmokeCharges[player] = charges - 1
 
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -354,7 +453,7 @@ Remotes.ThrowSmoke.OnServerEvent:Connect(function(player: Player)
 end)
 
 Remotes.MakeNoise.OnServerEvent:Connect(function(player: Player)
-    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] then return end
+    if Remotes.CurrentPhase.Value ~= "LootPhase" or eliminatedPlayers[player] or CoopService.IsDowned(player) then return end
     if not canPerformAction(player, "MakeNoise", 0.75) then return end
 
     local char = player.Character
@@ -363,6 +462,93 @@ Remotes.MakeNoise.OnServerEvent:Connect(function(player: Player)
     if not hrp or not humanoid or humanoid.Health <= 0 then return end
 
     GuardAI.RegisterNoise(hrp.Position, 40)
+end)
+
+Remotes.ToggleCrouch.OnServerEvent:Connect(function(player: Player, isCrouched: any)
+    if typeof(isCrouched) ~= "boolean" then return end
+    player:SetAttribute("IsCrouched", isCrouched)
+
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum and not CoopService.IsDowned(player) then
+        local inv = LootService.GetInventory(player)
+        local curLoadout = LoadoutService.GetActiveLoadout(player)
+        local effMaxWeight = getEffectiveMaxWeight(player)
+        local baseSpeed = LootLogic.CalculateWalkSpeed(
+            inv and inv.TotalWeight or 0,
+            effMaxWeight,
+            curLoadout.WalkSpeed,
+            8
+        )
+        hum.WalkSpeed = if isCrouched then math.max(6, math.floor(baseSpeed * 0.55)) else baseSpeed
+    end
+end)
+
+Remotes.RadioPing.OnServerEvent:Connect(function(player: Player, pingPos: any, pingType: any)
+    local phase = Remotes.CurrentPhase.Value
+    if phase ~= "LootPhase" and phase ~= "ExtractionPhase" then return end
+    if not isFiniteVector3(pingPos) then return end
+    if typeof(pingType) ~= "string" then pingType = "Danger" end
+    if not canPerformAction(player, "RadioPing", 1.5) then return end
+
+    Remotes.RadioPing:FireAllClients(player, pingPos, pingType)
+end)
+
+Remotes.GrappleEffect.OnServerEvent:Connect(function(player: Player, targetPos: any, isActive: any)
+    if typeof(isActive) ~= "boolean" then return end
+    if eliminatedPlayers[player] or CoopService.IsDowned(player) then return end
+
+    if isActive then
+        if not isFiniteVector3(targetPos) then return end
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        if not hrp then return end
+
+        local curLoadout = LoadoutService.GetActiveLoadout(player)
+        local maxDist = (curLoadout.GrappleDistance or 150) + 15
+        if (hrp.Position - targetPos).Magnitude > maxDist then return end
+
+        Remotes.GrappleEffect:FireAllClients(player, targetPos, true)
+    else
+        Remotes.GrappleEffect:FireAllClients(player, Vector3.zero, false)
+    end
+end)
+
+Remotes.RevivePlayer.OnServerEvent:Connect(function(player: Player, targetPlayer: any)
+    if typeof(targetPlayer) ~= "Instance" or not targetPlayer:IsA("Player") then return end
+    if targetPlayer == player then return end
+    if CoopService.IsDowned(targetPlayer) and not CoopService.IsDowned(player) then
+        local char = player.Character
+        local targetChar = targetPlayer.Character
+        if char and targetChar and char.PrimaryPart and targetChar.PrimaryPart then
+            if (char.PrimaryPart.Position - targetChar.PrimaryPart.Position).Magnitude <= 15 then
+                CoopService.RevivePlayer(targetPlayer, player)
+            end
+        end
+    end
+end)
+
+Remotes.BuyHideoutDeco.OnServerEvent:Connect(function(player: Player, decoId: any)
+    if typeof(decoId) ~= "string" then return end
+    local DECO_PRICES: { [string]: number } = {
+        NeonSign = 1000,
+        ArmoredDoor = 2500,
+        TacticalMap = 1500,
+        GoldTrophyStand = 5000,
+    }
+    local price = DECO_PRICES[decoId]
+    if not price then return end
+
+    local leaderstats = player:FindFirstChild("leaderstats")
+    local cash = leaderstats and leaderstats:FindFirstChild("Cash") :: IntValue?
+    if not cash or cash.Value < price then return end
+
+    local unlocked = DataService.UnlockHideoutDeco(player, decoId)
+    if unlocked then
+        cash.Value -= price
+        Remotes.HideoutDecoUpdated:FireClient(player, DataService.GetHideoutDecos(player))
+        DataService.SavePlayerData(player)
+    end
 end)
 
 -- Подключение игроков
@@ -393,6 +579,7 @@ Players.PlayerRemoving:Connect(function(player: Player)
     playerHideoutSlots[player] = nil
     eliminatedPlayers[player] = nil
     remoteActionTimes[player] = nil
+    playerSmokeCharges[player] = nil
 
     LootService.RemovePlayer(player)
     LoadoutService.RemovePlayer(player)
@@ -404,6 +591,7 @@ end
 
 -- Корректное завершение работы сервера
 game:BindToClose(function()
+    AnalyticsService.Flush()
     local playersToSave = Players:GetPlayers()
     local pending = #playersToSave
     if pending == 0 then return end

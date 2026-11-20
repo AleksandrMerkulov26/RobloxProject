@@ -1,18 +1,51 @@
+--!nolint BuiltinGlobalWrite
 -- Deterministic tests for pure gameplay rules.
 -- Run in CI with: lune run tests/RaidProgression.spec.luau
 
 -- NightEvents defines a Color3 value for its rare loot at module load time.
 -- This tiny stub keeps the pure event data testable outside Roblox.
-Color3 = {
-    fromRGB = function(r, g, b)
-        return { R = r, G = g, B = b }
-    end,
-}
+if not Color3 then
+    Color3 = {
+        fromRGB = function(r, g, b)
+            return { R = r, G = g, B = b }
+        end,
+    }
+end
+
+if not game then
+    game = {
+        GetService = function(_, serviceName)
+            if serviceName == "ReplicatedStorage" then
+                return {
+                    WaitForChild = function(_, childName)
+                        if childName == "Shared" then
+                            return {
+                                WaitForChild = function(_, modName)
+                                    if modName == "Locale" then
+                                        return {
+                                            Get = function(key) return key end,
+                                            Format = function(key, ...) return key end,
+                                        }
+                                    end
+                                    return {}
+                                end
+                            }
+                        end
+                        return {}
+                    end
+                }
+            end
+            return {}
+        end
+    }
+end
 
 local RaidProgression = require("../src/shared/RaidProgression")
 local LootLogic = require("../src/shared/LootLogic")
 local NightEvents = require("../src/shared/NightEvents")
 local MapConfigs = require("../src/shared/MapConfigs")
+local CosmeticsConfig = require("../src/shared/CosmeticsConfig")
+local ContractService = require("../src/shared/ContractService")
 
 local total = 0
 local failures = {}
@@ -110,7 +143,9 @@ expect("Calm is selected at high roll", NightEvents.Pick(0.9).Id, "Calm")
 expect("edge roll 0.999999 picks last event (Calm)", NightEvents.Pick(0.999999).Id, "Calm")
 expect("negative roll is clamped to Blackout", NightEvents.Pick(-1.0).Id, "Blackout")
 expect("roll exceeding 1.0 is clamped to Calm", NightEvents.Pick(2.5).Id, "Calm")
-expect("Jackpot contains golden crown id", NightEvents.Pick(0.6).JackpotLoot.Id, "Crown")
+local jackpotEvent = NightEvents.Pick(0.6)
+local jackpotItem = jackpotEvent.JackpotLoot
+expect("Jackpot contains golden crown id", jackpotItem and jackpotItem.Id, "Crown")
 expect("Blackout enables darkness", NightEvents.Pick(0.1).Darkness, true)
 expect("Calm does not enable darkness", NightEvents.Pick(0.9).Darkness, false)
 
@@ -183,6 +218,20 @@ expect("archive vault map exists", MapConfigs.Get("Archive").Id, "Archive")
 expect("cargo docks map exists", MapConfigs.Get("Docks").Id, "Docks")
 expect("archive map has keycard spawns", #MapConfigs.Get("Archive").KeycardSpawns > 0, true)
 expect("cargo docks has vertical crane beams", #MapConfigs.Get("Docks").Beams > 0, true)
+
+-- Cosmetics catalog checks
+expect("cosmetics catalog contains items", #CosmeticsConfig.Items >= 4, true)
+expect("balaclava mask exists", CosmeticsConfig.GetItem("Balaclava") ~= nil, true)
+expect("oni cyber mask exists", CosmeticsConfig.GetItem("OniCyber") ~= nil, true)
+expect("neon grapple skin exists", CosmeticsConfig.GetItem("NeonGrapple") ~= nil, true)
+
+-- Daily contracts checks
+local dayNum = ContractService.GetDayNumber()
+expect("day number is valid positive integer", dayNum > 0, true)
+local contracts = ContractService.GetDailyContracts()
+expect("daily contracts returns 3 entries", #contracts, 3)
+expect("first contract has reward", contracts[1].RewardCash > 0, true)
+expect("first contract has target", contracts[1].TargetAmount > 0, true)
 
 print(string.format("Gameplay unit tests: %d checks, %d failures.", total, #failures))
 if #failures > 0 then
