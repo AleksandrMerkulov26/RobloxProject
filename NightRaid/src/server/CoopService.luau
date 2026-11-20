@@ -113,7 +113,7 @@ function CoopService.DownPlayer(player: Player)
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then return end
+    if not hrp or not hum or hum.Health <= 0 then return end
 
     player:SetAttribute("IsDowned", true)
     hum.WalkSpeed = 0
