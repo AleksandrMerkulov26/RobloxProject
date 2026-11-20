@@ -519,16 +519,7 @@ end)
 
 Remotes.RevivePlayer.OnServerEvent:Connect(function(player: Player, targetPlayer: any)
     if typeof(targetPlayer) ~= "Instance" or not targetPlayer:IsA("Player") then return end
-    if targetPlayer == player then return end
-    if CoopService.IsDowned(targetPlayer) and not CoopService.IsDowned(player) then
-        local char = player.Character
-        local targetChar = targetPlayer.Character
-        if char and targetChar and char.PrimaryPart and targetChar.PrimaryPart then
-            if (char.PrimaryPart.Position - targetChar.PrimaryPart.Position).Magnitude <= 15 then
-                CoopService.RevivePlayer(targetPlayer, player)
-            end
-        end
-    end
+    CoopService.RevivePlayer(targetPlayer, player)
 end)
 
 Remotes.BuyHideoutDeco.OnServerEvent:Connect(function(player: Player, decoId: any)
