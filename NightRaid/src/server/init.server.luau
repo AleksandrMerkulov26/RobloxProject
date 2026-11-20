@@ -33,7 +33,8 @@ local playerHideouts: { [Player]: { Model: Model, SpawnCFrame: CFrame, Data: any
 local playerHideoutSlots: { [Player]: number } = {}
 local hideoutSlotOwners: { [number]: Player? } = {}
 local eliminatedPlayers: { [Player]: boolean } = {}
-local handledDeathCharacters: { [Model]: boolean } = {}
+-- Character instances are short-lived; weak keys avoid retaining every respawn forever.
+local handledDeathCharacters: { [Model]: boolean } = setmetatable({}, { __mode = "k" })
 local remoteActionTimes: { [Player]: { [string]: number } } = {}
 local playerSmokeCharges: { [Player]: number } = {}
 
@@ -165,7 +166,13 @@ local function handlePlayerElimination(player: Player, hrpPosition: Vector3)
     local character = player.Character
     if character and handledDeathCharacters[character] then return end
     if character then
+        -- Mark before changing Health: the resulting Died event must not schedule
+        -- a second respawn for the same character.
         handledDeathCharacters[character] = true
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            humanoid.Health = 0
+        end
     end
 
     local phase = Remotes.CurrentPhase.Value
@@ -307,6 +314,9 @@ local function InitPlayer(player: Player)
         hum.WalkSpeed = activeLoadout.WalkSpeed
 
         hum.Died:Connect(function()
+            -- A server-side elimination already owns this character's respawn.
+            if handledDeathCharacters[char] then return end
+
             if CoopService.IsDowned(player) then
                 CoopService.ClearDowned(player)
             end
