@@ -152,7 +152,7 @@ function DataService.SetHideoutData(player: Player, data: { Version: number, Lev
     playerHideoutData[player] = data
 end
 
-function DataService.LoadPlayerData(player: Player)
+function DataService.LoadPlayerData(player: Player): boolean
     local rawLeaderstats = player:FindFirstChild("leaderstats")
     local leaderstatsFolder: Instance
     if rawLeaderstats then
@@ -292,11 +292,19 @@ function DataService.LoadPlayerData(player: Player)
                 cash.Value = math.clamp(math.floor(savedData), 0, 2000000000)
             end
         else
-            warn(string.format("[DataService] Failed to load data for %s: %s", player.Name, tostring(savedData)))
+            warn(string.format("[DataService] Failed to load data for %s after retries: %s", player.Name, tostring(savedData)))
+            return false
         end
-    else
+    elseif TEST_MODE then
+        -- Studio can continue with session-only data if DataStore access is unavailable.
+        warn("[DataService] Studio session is running without DataStore persistence.")
         playerDataLoaded[player] = true
+    else
+        warn("[DataService] DataStore unavailable; refusing to initialize a player with temporary data.")
+        return false
     end
+
+    return playerDataLoaded[player] == true
 end
 
 function DataService.SavePlayerData(player: Player): boolean
