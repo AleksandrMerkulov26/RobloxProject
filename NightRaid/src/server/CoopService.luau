@@ -174,26 +174,37 @@ function CoopService.DownPlayer(player: Player)
     end)
 end
 
-function CoopService.RevivePlayer(downedPlayer: Player, rescuer: Player)
+function CoopService.RevivePlayer(downedPlayer: Player, rescuer: Player): boolean
+    if downedPlayer == rescuer then return false end
+    if downedPlayer.Parent ~= _Players or rescuer.Parent ~= _Players then return false end
+
+    local phase = Remotes.CurrentPhase.Value
+    if phase ~= "LootPhase" and phase ~= "ExtractionPhase" then return false end
+    if isPlayerEliminatedFn and (isPlayerEliminatedFn(downedPlayer) or isPlayerEliminatedFn(rescuer)) then return false end
+    if CoopService.IsDowned(rescuer) then return false end
+
     local data = downedPlayers[downedPlayer]
-    if not data then return end
+    if not data then return false end
+
+    local downedChar = downedPlayer.Character
+    local rescuerChar = rescuer.Character
+    local downedRoot = downedChar and downedChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+    local rescuerRoot = rescuerChar and rescuerChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+    local downedHumanoid = downedChar and downedChar:FindFirstChildOfClass("Humanoid")
+    local rescuerHumanoid = rescuerChar and rescuerChar:FindFirstChildOfClass("Humanoid")
+    if not downedRoot or not rescuerRoot or not downedHumanoid or not rescuerHumanoid then return false end
+    if downedHumanoid.Health <= 0 or rescuerHumanoid.Health <= 0 then return false end
+    if (downedRoot.Position - rescuerRoot.Position).Magnitude > 9 then return false end
 
     CoopService.ClearDowned(downedPlayer)
+    disableRagdoll(downedChar)
 
-    local char = downedPlayer.Character
-    if char then
-        disableRagdoll(char)
-    end
-
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.Health = 45 -- Поднят с частью здоровья
-        hum.AutoRotate = true
-        if restorePlayerSpeedFn then
-            restorePlayerSpeedFn(downedPlayer)
-        else
-            hum.WalkSpeed = 16
-        end
+    downedHumanoid.Health = 45
+    downedHumanoid.AutoRotate = true
+    if restorePlayerSpeedFn then
+        restorePlayerSpeedFn(downedPlayer)
+    else
+        downedHumanoid.WalkSpeed = 16
     end
 
     downedPlayer:SetAttribute("IsDowned", false)
@@ -201,6 +212,7 @@ function CoopService.RevivePlayer(downedPlayer: Player, rescuer: Player)
 
     Remotes.InventoryUpdated:FireClient(downedPlayer, {}, Locale.Get("RevivedNotice"))
     Remotes.InventoryUpdated:FireClient(rescuer, {}, Locale.Format("RevivedTeammateNotice", downedPlayer.DisplayName))
+    return true
 end
 
 function CoopService.ClearDowned(player: Player)
