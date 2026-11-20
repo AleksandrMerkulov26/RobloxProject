@@ -256,64 +256,76 @@ local function InitPlayer(player: Player)
         local activeLoadout = LoadoutService.GetActiveLoadout(player)
         hum.WalkSpeed = activeLoadout.WalkSpeed
 
+        -- Keep the Humanoid from entering the irreversible Dead state.
+        -- We own the death lifecycle and decide whether the player is downed or eliminated.
+        hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+
+        local deathHandled = false
+
         hum.HealthChanged:Connect(function(health)
-            if health <= 1 and not isPlayerEliminated(player) then
-                if CoopService.IsDowned(player) then
-                    -- Добивание: получение урона в нокауте окончательно устраняет игрока
-                    CoopService.ClearDowned(player)
-                    handlePlayerElimination(player, hrp.Position)
-                    return
-                end
-
-                local phase = Remotes.CurrentPhase.Value
-                local raidIsActive = RaidProgression.ShouldEliminate(phase)
-                local inv = LootService.GetInventory(player)
-                local isEscaped = inv and inv.Escaped
-
-                if raidIsActive and not isEscaped then
-                    hum.Health = 1
-                    CoopService.DownPlayer(player)
-                end
+            if health > 0 or deathHandled then
+                return
             end
-        end)
 
-        hum.Died:Connect(function()
+            -- Dead state is disabled above, so restore a minimal amount of health
+            -- before running the server-authoritative downed/elimination flow.
+            hum.Health = 1
+
             local phase = Remotes.CurrentPhase.Value
             local raidIsActive = RaidProgression.ShouldEliminate(phase)
             local inv = LootService.GetInventory(player)
             local isEscaped = inv and inv.Escaped
 
-            -- A lethal hit can reach Died before the HealthChanged handler has
-            -- completed the downed transition. Give the downed flow one chance
-            -- to restore the character to 1 HP and create the revive prompt.
-            if raidIsActive and not isEscaped and not eliminatedPlayers[player]
-                and not CoopService.IsDowned(player) then
-                hum.Health = 1
-                CoopService.DownPlayer(player)
-            end
-
-            -- A downed player must stay in the raid for the bleedout window.
-            -- Do not run the normal respawn/elimination path while awaiting revive.
-            if CoopService.IsDowned(player) then
-                if hum.Health <= 0 then
-                    hum.Health = 1
+            if raidIsActive and not isEscaped and not isPlayerEliminated(player) then
+                if CoopService.IsDowned(player) then
+                    -- A second lethal hit finishes an already downed player.
+                    deathHandled = true
+                    CoopService.ClearDowned(player)
+                    handlePlayerElimination(player, hrp.Position)
+                    return
                 end
-                hum:ChangeState(Enum.HumanoidStateType.Physics)
+
+                CoopService.DownPlayer(player)
+                if not CoopService.IsDowned(player) then
+                    -- Fail safely if the character cannot enter the downed state.
+                    deathHandled = true
+                    handlePlayerElimination(player, hrp.Position)
+                end
                 return
             end
 
-            -- Если смерть произошла вне рейда (в лобби, после побега или при повторном падении на базе)
-            if not raidIsActive or isEscaped or eliminatedPlayers[player] then
+            -- Death outside an active raid: respawn at the hideout.
+            deathHandled = true
+            task.delay(2, function()
+                if player.Parent == Players then
+                    loadCharacterForPlayer(player)
+                end
+            end)
+        end)
+
+        -- Defensive fallback. Normally unreachable because the Dead state is disabled.
+        hum.Died:Connect(function()
+            if deathHandled then return end
+            deathHandled = true
+
+            if CoopService.IsDowned(player) then
+                CoopService.ClearDowned(player)
+            end
+
+            local phase = Remotes.CurrentPhase.Value
+            local raidIsActive = RaidProgression.ShouldEliminate(phase)
+            local inv = LootService.GetInventory(player)
+            local isEscaped = inv and inv.Escaped
+
+            if raidIsActive and not isEscaped and not isPlayerEliminated(player) then
+                handlePlayerElimination(player, hrp.Position)
+            else
                 task.delay(2, function()
                     if player.Parent == Players then
                         loadCharacterForPlayer(player)
                     end
                 end)
-                return
             end
-
-            -- Смерть в рейде, которую не удалось перевести в состояние Downed.
-            handlePlayerElimination(player, hrp.Position)
         end)
 
         local fallY = 0
