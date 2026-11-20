@@ -33,6 +33,7 @@ local playerHideouts: { [Player]: { Model: Model, SpawnCFrame: CFrame, Data: any
 local playerHideoutSlots: { [Player]: number } = {}
 local hideoutSlotOwners: { [number]: Player? } = {}
 local eliminatedPlayers: { [Player]: boolean } = {}
+local handledDeathCharacters: { [Model]: boolean } = {}
 local remoteActionTimes: { [Player]: { [string]: number } } = {}
 local playerSmokeCharges: { [Player]: number } = {}
 
@@ -110,9 +111,18 @@ LootService.SetDependencies({
     IsPlayerDowned = function(player: Player) return CoopService.IsDowned(player) end,
 })
 
+local applyPlayerDamageFn: ((humanoid: Humanoid, damage: number) -> ())?
+
 GuardAI.SetDependencies({
     IsPlayerEliminated = isPlayerEliminated,
     GetActiveNightEvent = function() return RoundController.GetActiveNightEvent() end,
+    ApplyPlayerDamage = function(humanoid: Humanoid, damage: number)
+        if applyPlayerDamageFn then
+            applyPlayerDamageFn(humanoid, damage)
+        else
+            humanoid:TakeDamage(damage)
+        end
+    end,
 })
 
 RoundController.SetDependencies({
@@ -152,6 +162,12 @@ local function AllocateHideoutSlot(player: Player): number
 end
 
 local function handlePlayerElimination(player: Player, hrpPosition: Vector3)
+    local character = player.Character
+    if character and handledDeathCharacters[character] then return end
+    if character then
+        handledDeathCharacters[character] = true
+    end
+
     local phase = Remotes.CurrentPhase.Value
     local raidIsActive = RaidProgression.ShouldEliminate(phase)
     if raidIsActive then
@@ -200,6 +216,40 @@ CoopService.SetDependencies({
         end
     end,
 })
+
+-- Единственная точка обработки урона от NPC по игрокам.
+-- Смертельный удар сначала переводит персонажа в состояние Downed,
+-- не позволяя Humanoid перейти в необратимое состояние Dead.
+applyPlayerDamageFn = function(humanoid: Humanoid, damage: number)
+    if damage <= 0 or humanoid.Health <= 0 then return end
+    local character = humanoid.Parent
+    if not character or not character:IsA("Model") then return end
+    local player = Players:GetPlayerFromCharacter(character)
+    if not player or player.Parent ~= Players or isPlayerEliminated(player) then return end
+
+    local inventory = LootService.GetInventory(player)
+    local phase = Remotes.CurrentPhase.Value
+    local inRaid = RaidProgression.ShouldEliminate(phase) and not (inventory and inventory.Escaped)
+
+    if inRaid and CoopService.IsDowned(player) then
+        local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local position = root and root.Position or Vector3.zero
+        CoopService.ClearDowned(player)
+        handlePlayerElimination(player, position)
+        return
+    end
+
+    if inRaid and humanoid.Health - damage <= 0 then
+        CoopService.DownPlayer(player)
+        if not CoopService.IsDowned(player) then
+            -- Fail safely if the character cannot enter the downed state.
+            humanoid:TakeDamage(damage)
+        end
+        return
+    end
+
+    humanoid:TakeDamage(damage)
+end
 
 local function InitPlayer(player: Player)
     if not DataService.LoadPlayerData(player) then
@@ -256,28 +306,11 @@ local function InitPlayer(player: Player)
         local activeLoadout = LoadoutService.GetActiveLoadout(player)
         hum.WalkSpeed = activeLoadout.WalkSpeed
 
-        hum.HealthChanged:Connect(function(health)
-            if health <= 1 and not isPlayerEliminated(player) then
-                if CoopService.IsDowned(player) then
-                    -- Добивание: получение урона в нокауте окончательно устраняет игрока
-                    CoopService.ClearDowned(player)
-                    handlePlayerElimination(player, hrp.Position)
-                    return
-                end
-
-                local phase = Remotes.CurrentPhase.Value
-                local raidIsActive = RaidProgression.ShouldEliminate(phase)
-                local inv = LootService.GetInventory(player)
-                local isEscaped = inv and inv.Escaped
-
-                if raidIsActive and not isEscaped then
-                    hum.Health = 1
-                    CoopService.DownPlayer(player)
-                end
-            end
-        end)
-
         hum.Died:Connect(function()
+            if CoopService.IsDowned(player) then
+                CoopService.ClearDowned(player)
+            end
+
             local phase = Remotes.CurrentPhase.Value
             local raidIsActive = RaidProgression.ShouldEliminate(phase)
             local inv = LootService.GetInventory(player)
