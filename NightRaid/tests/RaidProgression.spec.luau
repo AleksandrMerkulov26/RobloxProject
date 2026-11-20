@@ -12,6 +12,26 @@ if not Color3 then
     }
 end
 
+-- MapConfigs is data-only for these tests, but its module constructs Roblox
+-- value types at load time. Provide minimal deterministic stand-ins.
+if not Vector3 then
+    Vector3 = {
+        new = function(x, y, z)
+            return { X = x, Y = y, Z = z }
+        end,
+    }
+end
+
+if not Enum then
+    Enum = {
+        Material = setmetatable({}, {
+            __index = function(_, materialName)
+                return materialName
+            end,
+        }),
+    }
+end
+
 if not game then
     game = {
         GetService = function(_, serviceName)
