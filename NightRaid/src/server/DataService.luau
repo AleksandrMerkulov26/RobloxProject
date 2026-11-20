@@ -2,6 +2,7 @@
 local DataStoreService = game:GetService("DataStoreService")
 local RunService = game:GetService("RunService")
 local _Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
@@ -25,6 +26,9 @@ end
 
 local playerDataLoaded: { [Player]: boolean } = {}
 local playerSaveInProgress: { [Player]: boolean? } = {}
+local sessionTokens: { [Player]: string } = {}
+local SESSION_LEASE_SECONDS = 180
+local SESSION_RENEW_INTERVAL = 60
 local playerOwnedLoadouts: { [Player]: { [string]: boolean } } = {}
 local playerUpgrades: { [Player]: { Pockets: number, SmokeStarter: number, Battery: number } } = {}
 local playerHideoutData: { [Player]: { Version: number, Level: number } } = {}
@@ -38,6 +42,126 @@ export type PlayerContractsData = {
 }
 
 local playerContracts: { [Player]: PlayerContractsData } = {}
+
+local function acquireSessionLock(player: Player, key: string): boolean
+    if not dataStoreAvailable or not PlayerDataStore then return false end
+
+    local token = HttpService:GenerateGUID(false)
+    local now = os.time()
+    local success, updatedRecord = pcall(function()
+        return PlayerDataStore:UpdateAsync(key, function(oldValue)
+            local record
+            if type(oldValue) == "table" then
+                record = oldValue
+            elseif type(oldValue) == "number" then
+                -- Preserve legacy cash-only records while migrating to the profile table.
+                record = { Cash = oldValue }
+            elseif oldValue == nil then
+                record = {}
+            else
+                return nil
+            end
+
+            local currentLock = record._SessionLock
+            if type(currentLock) == "table"
+                and type(currentLock.ExpiresAt) == "number"
+                and currentLock.ExpiresAt > now
+                and currentLock.Token ~= token then
+                return nil
+            end
+
+            record._SessionLock = {
+                Token = token,
+                ExpiresAt = now + SESSION_LEASE_SECONDS,
+            }
+            return record
+        end)
+    end)
+
+    if not success then
+        warn(string.format("[DataService] Could not acquire session lock for %s: %s", player.Name, tostring(updatedRecord)))
+        return false
+    end
+
+    if type(updatedRecord) ~= "table"
+        or type(updatedRecord._SessionLock) ~= "table"
+        or updatedRecord._SessionLock.Token ~= token then
+        warn(string.format("[DataService] Profile for %s is already active in another server.", player.Name))
+        return false
+    end
+
+    sessionTokens[player] = token
+    return true
+end
+
+local function renewSessionLock(player: Player, token: string)
+    local key = "Player_" .. player.UserId
+    local now = os.time()
+    local success, updatedRecord = pcall(function()
+        return PlayerDataStore:UpdateAsync(key, function(oldValue)
+            if type(oldValue) ~= "table" then return nil end
+            local lock = oldValue._SessionLock
+            if type(lock) ~= "table" or lock.Token ~= token then return nil end
+            if type(lock.ExpiresAt) ~= "number" or lock.ExpiresAt <= now then return nil end
+
+            oldValue._SessionLock = {
+                Token = token,
+                ExpiresAt = now + SESSION_LEASE_SECONDS,
+            }
+            return oldValue
+        end)
+    end)
+
+    if not success then
+        warn(string.format("[DataService] Session lock renewal failed for %s: %s", player.Name, tostring(updatedRecord)))
+        return
+    end
+
+    if type(updatedRecord) ~= "table"
+        or type(updatedRecord._SessionLock) ~= "table"
+        or updatedRecord._SessionLock.Token ~= token then
+        sessionTokens[player] = nil
+        warn(string.format("[DataService] Session lock was lost for %s; disconnecting to protect saved data.", player.Name))
+        if player.Parent == _Players then
+            player:Kick("Your data session expired. Please rejoin to protect your progress.")
+        end
+    end
+end
+
+local function startSessionRenewal(player: Player)
+    local token = sessionTokens[player]
+    if not token then return end
+
+    task.spawn(function()
+        while sessionTokens[player] == token and player.Parent == _Players do
+            task.wait(SESSION_RENEW_INTERVAL)
+            if sessionTokens[player] ~= token or player.Parent ~= _Players then break end
+            renewSessionLock(player, token)
+        end
+    end)
+end
+
+local function releaseSessionLock(player: Player)
+    local token = sessionTokens[player]
+    if not token then return end
+    sessionTokens[player] = nil
+
+    if not dataStoreAvailable or not PlayerDataStore then return end
+    local key = "Player_" .. player.UserId
+    local success, err = pcall(function()
+        PlayerDataStore:UpdateAsync(key, function(oldValue)
+            if type(oldValue) ~= "table" then return nil end
+            local lock = oldValue._SessionLock
+            if type(lock) ~= "table" or lock.Token ~= token then return nil end
+            oldValue._SessionLock = nil
+            return oldValue
+        end)
+    end)
+
+    if not success then
+        warn(string.format("[DataService] Could not release session lock for %s: %s", player.Name, tostring(err)))
+    end
+end
 
 function DataService.IsDataLoaded(player: Player): boolean
     return playerDataLoaded[player] == true
@@ -208,6 +332,10 @@ function DataService.LoadPlayerData(player: Player): boolean
 
     if dataStoreAvailable and PlayerDataStore then
         local key = "Player_" .. player.UserId
+        if not acquireSessionLock(player, key) then
+            return false
+        end
+
         local success, savedData = false, nil
 
         -- До 3 попыток чтения при временных сбоях сети DataStore
@@ -293,6 +421,7 @@ function DataService.LoadPlayerData(player: Player): boolean
             end
         else
             warn(string.format("[DataService] Failed to load data for %s after retries: %s", player.Name, tostring(savedData)))
+            releaseSessionLock(player)
             return false
         end
     elseif TEST_MODE then
@@ -302,6 +431,10 @@ function DataService.LoadPlayerData(player: Player): boolean
     else
         warn("[DataService] DataStore unavailable; refusing to initialize a player with temporary data.")
         return false
+    end
+
+    if playerDataLoaded[player] == true then
+        startSessionRenewal(player)
     end
 
     return playerDataLoaded[player] == true
@@ -316,6 +449,12 @@ function DataService.SavePlayerData(player: Player): boolean
 
     if not playerDataLoaded[player] then
         warn(string.format("[DataService] Skipping save for %s: data was not loaded successfully.", player.Name))
+        return false
+    end
+
+    local sessionToken = sessionTokens[player]
+    if not sessionToken then
+        warn(string.format("[DataService] Skipping save for %s: this server no longer owns the profile session.", player.Name))
         return false
     end
 
@@ -344,7 +483,7 @@ function DataService.SavePlayerData(player: Player): boolean
         streakStat and streakStat.Value or 0
     )
 
-    local dataToSave = {
+    local dataToSave: { [string]: any } = {
         Cash = math.max(0, math.floor(cash.Value)),
         Raids = normalized.Raids,
         Streak = normalized.Streak,
@@ -364,11 +503,22 @@ function DataService.SavePlayerData(player: Player): boolean
         Contracts = playerContracts[player] or { Day = ContractService.GetDayNumber(), Completed = {}, Progress = {} },
     }
 
-    local success, err = pcall(function()
-        PlayerDataStore:UpdateAsync("Player_" .. player.UserId, function(oldValue)
-            if type(oldValue) == "table" and type(oldValue.Version) == "number" then
+    local success, savedRecord = pcall(function()
+        return PlayerDataStore:UpdateAsync("Player_" .. player.UserId, function(oldValue)
+            if type(oldValue) ~= "table" then return nil end
+
+            local lock = oldValue._SessionLock
+            if type(lock) ~= "table"
+                or lock.Token ~= sessionToken
+                or type(lock.ExpiresAt) ~= "number"
+                or lock.ExpiresAt <= os.time() then
+                return nil
+            end
+
+            if type(oldValue.Version) == "number" then
                 dataToSave.Hideout.Version = math.max(dataToSave.Hideout.Version, oldValue.Version)
             end
+            dataToSave._SessionLock = lock
             return dataToSave
         end)
     end)
@@ -376,7 +526,14 @@ function DataService.SavePlayerData(player: Player): boolean
     playerSaveInProgress[player] = nil
 
     if not success then
-        warn(string.format("[DataService] Failed to save data for %s: %s", player.Name, tostring(err)))
+        warn(string.format("[DataService] Failed to save data for %s: %s", player.Name, tostring(savedRecord)))
+        return false
+    end
+
+    if type(savedRecord) ~= "table"
+        or type(savedRecord._SessionLock) ~= "table"
+        or savedRecord._SessionLock.Token ~= sessionToken then
+        warn(string.format("[DataService] Save rejected for %s: profile session ownership was lost.", player.Name))
         return false
     end
 
@@ -385,6 +542,7 @@ end
 
 function DataService.RemovePlayer(player: Player)
     DataService.SavePlayerData(player)
+    releaseSessionLock(player)
     playerDataLoaded[player] = nil
     playerOwnedLoadouts[player] = nil
     playerUpgrades[player] = nil
