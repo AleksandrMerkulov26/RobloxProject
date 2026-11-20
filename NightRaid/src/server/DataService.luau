@@ -29,6 +29,7 @@ local playerSaveInProgress: { [Player]: boolean? } = {}
 local sessionTokens: { [Player]: string } = {}
 local SESSION_LEASE_SECONDS = 180
 local SESSION_RENEW_INTERVAL = 60
+local SAVE_LOCK_WAIT_TIMEOUT_SECONDS = 10
 local playerOwnedLoadouts: { [Player]: { [string]: boolean } } = {}
 local playerUpgrades: { [Player]: { Pockets: number, SmokeStarter: number, Battery: number } } = {}
 local playerHideoutData: { [Player]: { Version: number, Level: number } } = {}
@@ -443,7 +444,17 @@ end
 function DataService.SavePlayerData(player: Player): boolean
     if not dataStoreAvailable or not PlayerDataStore then return false end
 
+    -- A concurrent save may be waiting on DataStore. Never wait forever:
+    -- callers such as purchases and PlayerRemoving must receive a bounded result.
+    local waitDeadline = os.clock() + SAVE_LOCK_WAIT_TIMEOUT_SECONDS
     while playerSaveInProgress[player] do
+        if os.clock() >= waitDeadline then
+            warn(string.format(
+                "[DataService] Timed out waiting for an existing save for %s.",
+                player.Name
+            ))
+            return false
+        end
         task.wait(0.05)
     end
 
