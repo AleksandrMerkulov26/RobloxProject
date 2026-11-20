@@ -32,6 +32,18 @@ if not Enum then
     }
 end
 
+if not Random then
+    Random = {
+        new = function(_seed)
+            return {
+                NextInteger = function(_, minValue, _maxValue)
+                    return minValue
+                end,
+            }
+        end,
+    }
+end
+
 if not game then
     game = {
         GetService = function(_, serviceName)
